@@ -15,13 +15,22 @@ Policy-based autonomous wallets for AI agents on Sui.
 ## Current status
 
 - Move MVP implemented
-- `sui move test` passed: 7/7
+- `sui move test` passed: 10/10
 - Testnet mock flow verified
-- DeepBook real order integration pending
+- DeepBook real order integration verified
+
+## Verified Testnet Flow
+
+- Create Mandate
+- Authorize Spend
+- DeepBook Swap
+- Activity Event
+- Owner Revocation
 
 ## Commands
 
 ```bash
 sui move test
 sui client publish --gas-budget 100000000
+npm run agent:swap
 ```

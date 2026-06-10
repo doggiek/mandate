@@ -1,0 +1,18 @@
+{
+  "name": "mandate",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "agent:swap": "tsx scripts/agent-deepbook-swap.ts"
+  },
+  "dependencies": {
+    "@mysten/deepbook-v3": "^1.4.1",
+    "@mysten/sui": "^2.17.0",
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}
