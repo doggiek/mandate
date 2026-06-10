@@ -4,6 +4,7 @@
 module mandate::mandate;
 
 use sui::clock::{Self, Clock};
+use sui::coin::{Self, Coin};
 use sui::event;
 use sui::object::{Self, ID, UID};
 use sui::transfer;
@@ -33,6 +34,8 @@ const PROTOCOL_DEEPBOOK: u8 = 1;
 
 /// Human-readable action tag for the mocked DeepBook order path.
 const ACTION_DEEPBOOK_ORDER_MOCK: vector<u8> = b"deepbook_order_mock";
+/// Human-readable action tag for a real coin-backed DeepBook PTB authorization.
+const ACTION_DEEPBOOK_SPEND_AUTHORIZED: vector<u8> = b"deepbook_spend_authorized";
 
 /// Core owner-controlled mandate object.
 public struct Mandate has key {
@@ -198,6 +201,42 @@ entry fun execute_deepbook_order_mock(
         mandate_id: object::id(mandate),
         agent: sender,
         action: ACTION_DEEPBOOK_ORDER_MOCK,
+        amount,
+        protocol: PROTOCOL_DEEPBOOK,
+        timestamp_ms,
+        success: true,
+    });
+}
+
+/// Authorizes a real coin-backed DeepBook spend inside a PTB.
+///
+/// This function does not call DeepBook directly. It reads the exact value from
+/// `input_coin`, enforces the mandate policy, records spend, and emits an
+/// activity event. The same PTB can then pass `input_coin` into DeepBook.
+#[allow(unused_mut_parameter)]
+entry fun authorize_deepbook_spend_with_coin<T>(
+    mandate: &mut Mandate,
+    input_coin: &Coin<T>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let sender = tx_context::sender(ctx);
+    let timestamp_ms = clock::timestamp_ms(clock);
+    let amount = coin::value(input_coin);
+
+    assert!(sender == mandate.agent, E_NOT_AGENT);
+    assert!(mandate.is_active, E_REVOKED);
+    assert!(timestamp_ms <= mandate.expires_at_ms, E_EXPIRED);
+    assert!(mandate.protocol_scope == PROTOCOL_DEEPBOOK, E_PROTOCOL_NOT_ALLOWED);
+    assert!(amount <= mandate.max_single_tx, E_SINGLE_TX_LIMIT_EXCEEDED);
+    assert!(amount <= mandate.budget_ceiling - mandate.current_spent, E_BUDGET_EXCEEDED);
+
+    mandate.current_spent = mandate.current_spent + amount;
+
+    event::emit(ActivityEvent {
+        mandate_id: object::id(mandate),
+        agent: sender,
+        action: ACTION_DEEPBOOK_SPEND_AUTHORIZED,
         amount,
         protocol: PROTOCOL_DEEPBOOK,
         timestamp_ms,
