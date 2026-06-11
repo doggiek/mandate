@@ -44,6 +44,7 @@ import {
   useMandateStore,
 } from "@/lib/mandate-store"
 import {
+  AGENT_WALLET_ADDRESS,
   CLOCK_OBJECT_ID,
   NETWORK,
   PACKAGE_ID,
@@ -155,12 +156,13 @@ export function CreateMandateDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const { createMandate } = useMandateStore()
+  const { createMandate, refreshMandates } = useMandateStore()
   const account = useCurrentAccount()
   const client = useSuiClient()
+  const closeTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [label, setLabel] = React.useState("")
-  const [agentAddress, setAgentAddress] = React.useState("")
+  const [agentAddress, setAgentAddress] = React.useState(AGENT_WALLET_ADDRESS)
   const [budgetSui, setBudgetSui] = React.useState("0.1")
   const [txLimitSui, setTxLimitSui] = React.useState("0.01")
   const [ttlMs, setTtlMs] = React.useState(EXPIRATION_OPTIONS[1].value)
@@ -190,14 +192,33 @@ export function CreateMandateDialog({
   })
 
   React.useEffect(() => {
-    if (open && account?.address && !agentAddress) {
-      setAgentAddress(account.address)
+    if (open && !agentAddress) {
+      setAgentAddress(AGENT_WALLET_ADDRESS)
     }
-  }, [account?.address, agentAddress, open])
+  }, [agentAddress, open])
+
+  React.useEffect(() => {
+    return () => {
+      if (closeTimeoutRef.current) {
+        clearTimeout(closeTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  React.useEffect(() => {
+    if (open) {
+      return
+    }
+
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current)
+      closeTimeoutRef.current = null
+    }
+  }, [open])
 
   function reset() {
     setLabel("")
-    setAgentAddress(account?.address ?? "")
+    setAgentAddress(AGENT_WALLET_ADDRESS)
     setBudgetSui("0.1")
     setTxLimitSui("0.01")
     setTtlMs(EXPIRATION_OPTIONS[1].value)
@@ -207,6 +228,18 @@ export function CreateMandateDialog({
     setCreatedMandateId(null)
     setError(null)
     setNetwork(NETWORK as "mainnet" | "testnet")
+  }
+
+  function handleOpenChange(nextOpen: boolean) {
+    onOpenChange(nextOpen)
+
+    if (!nextOpen) {
+      if (closeTimeoutRef.current) {
+        clearTimeout(closeTimeoutRef.current)
+        closeTimeoutRef.current = null
+      }
+      reset()
+    }
   }
 
   const valid =
@@ -287,6 +320,14 @@ export function CreateMandateDialog({
       toast.success("Mandate created on-chain", {
         description: `${shortId(mandateId)} · ${shortId(result.digest)}`,
       })
+      refreshMandates()
+      if (closeTimeoutRef.current) {
+        clearTimeout(closeTimeoutRef.current)
+      }
+      closeTimeoutRef.current = setTimeout(() => {
+        handleOpenChange(false)
+        refreshMandates()
+      }, 800)
     } catch (caught) {
       console.error("[MANDATE] failed", caught)
       setStatus("error")
@@ -303,7 +344,7 @@ export function CreateMandateDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="fixed left-1/2 top-1/2 z-50 flex w-[calc(100vw-2rem)] max-w-[720px] -translate-x-1/2 -translate-y-1/2 flex-col gap-0 overflow-hidden border border-cyan-400/20 bg-zinc-950/95 p-0 shadow-2xl shadow-cyan-500/10 before:pointer-events-none before:absolute before:inset-0 before:rounded-xl before:shadow-[0_0_80px_rgba(34,211,238,0.12)] before:content-[''] sm:max-w-[720px]">
         <DialogHeader className="shrink-0 border-b border-cyan-400/10 px-5 py-4 pr-12">
           <DialogTitle className="text-xl font-semibold sm:text-2xl">
@@ -340,7 +381,8 @@ export function CreateMandateDialog({
                   onChange={(event) => setAgentAddress(event.target.value)}
                 />
                 <FieldDescription>
-                  Wallet authorized to execute actions under this mandate.
+                  Agent wallet authorized to execute DeepBook PTBs under this
+                  mandate.
                 </FieldDescription>
               </Field>
             </div>

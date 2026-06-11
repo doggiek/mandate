@@ -53,6 +53,11 @@ type StoreContextValue = {
   isWalletScoped: boolean
   createMandate: (input: NewMandateInput) => Mandate
   revokeMandate: (id: string, digest?: string) => void
+  recordAgentExecution: (input: {
+    mandateId: string
+    digest?: string
+    amountSui?: number
+  }) => void
   togglePause: (id: string) => void
   refreshMandates: () => void
   clearUserDemoData: () => void
@@ -523,6 +528,65 @@ export function MandateStoreProvider({
     [rpcMandates, seedMandates, userMandates]
   )
 
+  const recordAgentExecution = React.useCallback(
+    ({
+      mandateId,
+      digest,
+      amountSui = 0.001,
+    }: {
+      mandateId: string
+      digest?: string
+      amountSui?: number
+    }) => {
+      const incrementSpent = (mandate: Mandate) =>
+        mandate.id === mandateId
+          ? {
+              ...mandate,
+              spent: Math.min(mandate.spent + amountSui, mandate.budget),
+              spentSui: Math.min(
+                (mandate.spentSui ?? mandate.spent) + amountSui,
+                mandate.budgetCeilingSui ?? mandate.budget
+              ),
+            }
+          : mandate
+
+      setUserMandates((prev) => {
+        const next = prev.map(incrementSpent)
+        writeStorageArray(USER_MANDATES_KEY, next)
+        return next
+      })
+      setRpcMandates((prev) => prev.map(incrementSpent))
+      setSeedMandates((prev) => prev.map(incrementSpent))
+
+      const target = [...rpcMandates, ...userMandates, ...seedMandates].find(
+        (mandate) => mandate.id === mandateId
+      )
+      const executionActivity: ActivityEvent = {
+        id: digest ? `${digest}:optimistic-agent:${mandateId}` : randomId("evt"),
+        kind: "tx.executed",
+        mandateId,
+        agentName: target?.agent.name ?? "Market Maker",
+        protocol: target?.protocol ?? target?.protocols[0] ?? "DeepBook",
+        amount: amountSui,
+        amountSui,
+        message: "Agent authorized spend through Mandate policy object",
+        timestamp: new Date().toISOString(),
+        digest,
+        title: "Agent authorized spend",
+        status: "success",
+        timeDisplay: "just now",
+      }
+
+      setRpcActivity((prev) => uniqActivity([executionActivity, ...prev]))
+      setUserActivity((prev) => {
+        const next = uniqById([executionActivity, ...prev])
+        writeStorageArray(USER_ACTIVITY_KEY, next)
+        return next
+      })
+    },
+    [rpcMandates, seedMandates, userMandates]
+  )
+
   const togglePause = React.useCallback((id: string) => {
     setUserMandates((prev) => {
       const next = prev.map((m) =>
@@ -603,6 +667,7 @@ export function MandateStoreProvider({
       isWalletScoped: Boolean(account?.address),
       createMandate,
       revokeMandate,
+      recordAgentExecution,
       togglePause,
       refreshMandates,
       clearUserDemoData,
@@ -616,6 +681,7 @@ export function MandateStoreProvider({
       account?.address,
       createMandate,
       revokeMandate,
+      recordAgentExecution,
       togglePause,
       refreshMandates,
       clearUserDemoData,

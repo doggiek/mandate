@@ -26,6 +26,10 @@ export const VERIFIED_DEEPBOOK_DIGEST =
   process.env.NEXT_PUBLIC_VERIFIED_DEEPBOOK_DIGEST ??
   "DkV1SdVQhYw8U8ErQzkVZH225LkPqBeKtJBzkLk6PSfX"
 
+export const AGENT_WALLET_ADDRESS =
+  process.env.NEXT_PUBLIC_AGENT_WALLET_ADDRESS ??
+  "0x91dc52b575b3cd5703be07ee65e12b5af3a25d927b16fa8f94811b7b773ad8b2"
+
 export function formatConfigId(value: string, prefixLength = 6, suffixLength = 4) {
   return `${value.slice(0, prefixLength)}...${value.slice(-suffixLength)}`
 }

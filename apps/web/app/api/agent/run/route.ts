@@ -49,8 +49,20 @@ function parseAgentOutput(output: string, error?: string): AgentRunResult {
   }
 }
 
-export async function POST() {
+async function readMandateId(request: Request) {
+  try {
+    const body = (await request.json()) as { mandateId?: unknown }
+    return typeof body.mandateId === "string" && body.mandateId.trim()
+      ? body.mandateId.trim()
+      : CURRENT_MANDATE_ID
+  } catch {
+    return CURRENT_MANDATE_ID
+  }
+}
+
+export async function POST(request: Request) {
   const repoRoot = path.resolve(process.cwd(), "../..")
+  const mandateId = await readMandateId(request)
 
   try {
     const { stdout, stderr } = await execFileAsync(
@@ -61,7 +73,7 @@ export async function POST() {
         env: {
           ...process.env,
           PACKAGE_ID,
-          MANDATE_ID: CURRENT_MANDATE_ID,
+          MANDATE_ID: mandateId,
           POOL_KEY: DEEPBOOK_POOL_KEY,
         },
         timeout: 120_000,
