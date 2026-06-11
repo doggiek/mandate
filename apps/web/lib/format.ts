@@ -22,6 +22,13 @@ export function formatNumber(n: number, maxFractionDigits = 2): string {
   }).format(n)
 }
 
+export function formatSui(n: number, opts?: { compact?: boolean }): string {
+  return `${new Intl.NumberFormat("en-US", {
+    notation: opts?.compact && Math.abs(n) >= 1000 ? "compact" : "standard",
+    maximumFractionDigits: 4,
+  }).format(n)} SUI`
+}
+
 export function relativeTime(iso: string, referenceIso = DEMO_NOW_ISO): string {
   const then = new Date(iso).getTime()
   const now = new Date(referenceIso).getTime()

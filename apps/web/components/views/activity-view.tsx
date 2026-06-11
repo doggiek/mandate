@@ -20,6 +20,7 @@ import {
 import { ActivityFeed } from "@/components/activity-feed"
 import { useMandateStore } from "@/lib/mandate-store"
 import type { ActivityKind } from "@/lib/mandate-data"
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
 
 const KIND_FILTERS: { value: string; label: string }[] = [
   { value: "all", label: "All events" },
@@ -32,7 +33,7 @@ const KIND_FILTERS: { value: string; label: string }[] = [
 ]
 
 export function ActivityView() {
-  const { activity } = useMandateStore()
+  const { activity, loading, error, isWalletScoped } = useMandateStore()
   const [kind, setKind] = React.useState<string>("all")
 
   const filtered =
@@ -65,11 +66,29 @@ export function ActivityView() {
         </CardAction>
       </CardHeader>
       <CardContent className="py-0">
-        {filtered.length > 0 ? (
+        {loading ? (
+          <Empty className="py-12">
+            <EmptyHeader>
+              <EmptyTitle>Loading activity</EmptyTitle>
+              <EmptyDescription>
+                Querying Sui RPC for Mandate events.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : error ? (
+          <Empty className="py-12">
+            <EmptyHeader>
+              <EmptyTitle>Unable to load activity</EmptyTitle>
+              <EmptyDescription>{error}</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : filtered.length > 0 ? (
           <ActivityFeed events={filtered} />
         ) : (
           <p className="py-12 text-center text-sm text-muted-foreground">
-            No events match this filter.
+            {isWalletScoped
+              ? "No Mandate activity found for this wallet."
+              : "No events match this filter."}
           </p>
         )}
       </CardContent>

@@ -26,7 +26,7 @@ export function MandatesView({
   onSelectMandate: (id: string) => void
   onCreate: () => void
 }) {
-  const { mandates } = useMandateStore()
+  const { mandates, loading, error, isWalletScoped } = useMandateStore()
   const [filter, setFilter] = React.useState<Filter>("all")
 
   const filtered =
@@ -52,7 +52,29 @@ export function MandatesView({
         </Button>
       </div>
 
-      {filtered.length > 0 ? (
+      {loading ? (
+        <Empty className="rounded-xl border border-dashed border-border">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <ShieldOff />
+            </EmptyMedia>
+            <EmptyTitle>Loading mandates</EmptyTitle>
+            <EmptyDescription>
+              Querying Sui RPC for Mandate events and shared objects.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : error ? (
+        <Empty className="rounded-xl border border-dashed border-destructive/30">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <ShieldOff />
+            </EmptyMedia>
+            <EmptyTitle>Unable to load mandates</EmptyTitle>
+            <EmptyDescription>{error}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : filtered.length > 0 ? (
         <MandateTable mandates={filtered} onSelect={onSelectMandate} />
       ) : (
         <Empty className="rounded-xl border border-dashed border-border">
@@ -60,9 +82,13 @@ export function MandatesView({
             <EmptyMedia variant="icon">
               <ShieldOff />
             </EmptyMedia>
-            <EmptyTitle>No {filter} mandates</EmptyTitle>
+            <EmptyTitle>
+              {isWalletScoped ? "No mandates found for this wallet." : `No ${filter} mandates`}
+            </EmptyTitle>
             <EmptyDescription>
-              There are no mandates matching this filter.
+              {isWalletScoped
+                ? "Create a Mandate to delegate scoped authority to an agent."
+                : "There are no mandates matching this filter."}
             </EmptyDescription>
           </EmptyHeader>
         </Empty>

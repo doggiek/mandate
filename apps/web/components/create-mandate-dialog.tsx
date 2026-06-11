@@ -268,12 +268,17 @@ export function CreateMandateDialog({
         id: mandateId,
         label: label.trim(),
         agentId: AGENTS[1].id,
+        ownerAddress: account?.address,
+        agentAddress: agentAddress.trim(),
         budget: Number(formatMistAsSui(budgetCeilingMist)),
         txLimit: Number(formatMistAsSui(maxSingleTxMist)),
         approvalThreshold: Number(formatMistAsSui(maxSingleTxMist)),
         protocols: ["DeepBook"],
-        durationDays: 1,
+        durationDays: selectedExpiration.durationDays,
         network,
+        digest: result.digest,
+        ttlMs,
+        expiresLabel: selectedExpiration.label,
       })
 
       setDigest(result.digest)

@@ -2,7 +2,8 @@
 
 import { cn } from "@/lib/utils"
 import { ActivityBadge } from "@/components/status-badges"
-import { formatUsd, relativeTime } from "@/lib/format"
+import { formatConfigId } from "@/lib/chain-config"
+import { formatSui, relativeTime } from "@/lib/format"
 import type { ActivityEvent } from "@/lib/mandate-data"
 
 export function ActivityFeed({
@@ -38,9 +39,11 @@ export function ActivityFeed({
               {e.digest && (
                 <>
                   <span className="text-border">·</span>
-                  <span className="font-mono">{e.digest}</span>
+                  <span className="font-mono">{formatConfigId(e.digest, 6, 5)}</span>
                 </>
               )}
+              <span className="text-border">·</span>
+              <span className="font-mono">{formatConfigId(e.mandateId, 6, 5)}</span>
             </div>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-0.5">
@@ -52,11 +55,11 @@ export function ActivityFeed({
                   e.kind === "tx.executed" && "text-foreground"
                 )}
               >
-                {formatUsd(e.amount, { compact: true })}
+                {formatSui(e.amount, { compact: true })}
               </span>
             )}
             <span className="text-xs text-muted-foreground tabular-nums">
-              {relativeTime(e.timestamp)}
+              {e.timeDisplay ?? relativeTime(e.timestamp)}
             </span>
           </div>
         </li>

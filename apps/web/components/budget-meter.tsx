@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils"
-import { formatUsd } from "@/lib/format"
+import { formatSui } from "@/lib/format"
 
 export function BudgetMeter({
   spent,
@@ -25,10 +25,10 @@ export function BudgetMeter({
       {showLabel && (
         <div className="flex items-center justify-between text-xs">
           <span className="font-medium tabular-nums">
-            {formatUsd(spent, { compact: true })}
+            {formatSui(spent, { compact: true })}
           </span>
           <span className="text-muted-foreground tabular-nums">
-            {formatUsd(budget, { compact: true })}
+            {formatSui(budget, { compact: true })}
           </span>
         </div>
       )}

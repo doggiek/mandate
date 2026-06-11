@@ -24,12 +24,11 @@ import {
 } from "@/components/ui/sheet"
 import { Separator } from "@/components/ui/separator"
 import {
-  CURRENT_MANDATE_ID,
   DEEPBOOK_POOL_KEY,
   NETWORK,
   formatConfigId,
 } from "@/lib/chain-config"
-import { formatDate, formatUsd, relativeTime } from "@/lib/format"
+import { formatDate, formatSui, relativeTime } from "@/lib/format"
 import { useMandateStore } from "@/lib/mandate-store"
 import { cn } from "@/lib/utils"
 
@@ -109,8 +108,11 @@ export function MandateDetailSheet({
 
   const remaining = mandate ? Math.max(mandate.budget - mandate.spent, 0) : 0
   const agentAddress = mandate
-    ? MOCK_AGENT_ADDRESSES[mandate.agent.id] ?? MOCK_AGENT_ADDRESSES.ag_market
+    ? mandate.agentAddress ??
+      MOCK_AGENT_ADDRESSES[mandate.agent.id] ??
+      MOCK_AGENT_ADDRESSES.ag_market
     : MOCK_AGENT_ADDRESSES.ag_market
+  const ownerAddress = mandate?.ownerAddress ?? MOCK_OWNER_ADDRESS
 
   const handleRevoke = () => {
     if (!mandate || mandate.status === "revoked") return
@@ -121,7 +123,7 @@ export function MandateDetailSheet({
 
   return (
     <Sheet open={Boolean(mandateId)} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full overflow-y-auto border-border bg-background/95 p-0 backdrop-blur-xl sm:max-w-xl">
+      <SheetContent className="!fixed !right-0 !top-0 z-50 !h-screen w-full overflow-y-auto border-border bg-background/95 p-0 backdrop-blur-xl sm:max-w-xl">
         {mandate ? (
           <>
             <SheetHeader className="border-b border-border p-5">
@@ -137,7 +139,7 @@ export function MandateDetailSheet({
                     {mandate.label}
                   </SheetTitle>
                   <SheetDescription className="font-mono">
-                    {formatConfigId(CURRENT_MANDATE_ID)} · {NETWORK}
+                    {formatConfigId(mandate.id)} · {NETWORK}
                   </SheetDescription>
                 </div>
                 <Badge
@@ -195,20 +197,20 @@ export function MandateDetailSheet({
                 <div className="mt-4 grid grid-cols-2 gap-3">
                   <DetailMetric
                     label="Budget ceiling"
-                    value={formatUsd(mandate.budget)}
+                    value={formatSui(mandate.budget)}
                     tone="primary"
                   />
                   <DetailMetric
                     label="Remaining"
-                    value={formatUsd(remaining)}
+                    value={formatSui(remaining)}
                   />
                   <DetailMetric
                     label="Spent"
-                    value={formatUsd(mandate.spent)}
+                    value={formatSui(mandate.spent)}
                   />
                   <DetailMetric
                     label="Max single transaction"
-                    value={formatUsd(mandate.txLimit)}
+                    value={formatSui(mandate.txLimit)}
                   />
                 </div>
               </section>
@@ -218,7 +220,7 @@ export function MandateDetailSheet({
                   label="Owner address"
                   value={
                     <span className="block truncate font-mono">
-                      {compactAddress(MOCK_OWNER_ADDRESS)}
+                      {compactAddress(ownerAddress)}
                     </span>
                   }
                 />

@@ -21,21 +21,30 @@ export type Mandate = {
   id: string
   label: string
   agent: Agent
+  ownerAddress?: string
+  agentAddress?: string
+  digest?: string
   status: MandateStatus
-  /** total budget ceiling in USDC */
+  /** total budget ceiling in SUI */
   budget: number
-  /** spent so far in USDC */
+  /** spent so far in SUI */
   spent: number
   protocols: Protocol[]
   /** ISO timestamp */
   createdAt: string
   /** ISO timestamp */
   expiresAt: string
-  /** max single transaction in USDC */
+  /** max single transaction in SUI */
   txLimit: number
-  /** requests requiring approval above this USDC value */
+  /** requests requiring approval above this SUI value */
   approvalThreshold: number
   network: "mainnet" | "testnet"
+  budgetCeilingSui?: number
+  spentSui?: number
+  maxSingleTxSui?: number
+  protocol?: Protocol
+  expiresLabel?: string
+  createdAtDisplay?: string
 }
 
 export type ActivityKind =
@@ -52,12 +61,16 @@ export type ActivityEvent = {
   mandateId: string
   agentName: string
   protocol?: Protocol
-  /** USDC value */
+  /** SUI value */
   amount?: number
   message: string
   /** ISO timestamp */
   timestamp: string
   digest?: string
+  title?: string
+  status?: string
+  amountSui?: number
+  timeDisplay?: string
 }
 
 export type OrderSide = "buy" | "sell"

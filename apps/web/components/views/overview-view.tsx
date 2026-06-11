@@ -16,6 +16,7 @@ import { StatCard } from "@/components/stat-card"
 import { MandateTable } from "@/components/mandate-table"
 import { ActivityFeed } from "@/components/activity-feed"
 import { DEEPBOOK_POOL_KEY } from "@/lib/chain-config"
+import { formatSui } from "@/lib/format"
 import { useMandateStore } from "@/lib/mandate-store"
 import {
   ArrowRight,
@@ -35,18 +36,29 @@ export function OverviewView({
   onCreate: () => void
   onViewAll: () => void
 }) {
-  const { mandates, activity } = useMandateStore()
+  const { mandates, activity, loading, error, isWalletScoped } = useMandateStore()
+  const activeMandates = React.useMemo(
+    () => mandates.filter((m) => m.status === "active"),
+    [mandates]
+  )
 
   const stats = React.useMemo(() => {
+    const activeAgentKeys = new Set(
+      activeMandates.map((mandate) => mandate.agentAddress ?? mandate.agent.id)
+    )
+    const authorizedBudget = activeMandates.reduce(
+      (sum, mandate) => sum + mandate.budget,
+      0
+    )
+
     return {
-      activeAgents: 1,
-      activeMandates: 1,
+      activeAgents: activeAgentKeys.size,
+      activeMandates: activeMandates.length,
+      authorizedBudget,
       deepBookExecutions: 2,
       blockedActions: 1,
     }
-  }, [])
-
-  const activeMandates = mandates.filter((m) => m.status === "active")
+  }, [activeMandates])
 
   return (
     <div className="flex flex-col gap-6">
@@ -60,7 +72,7 @@ export function OverviewView({
         <StatCard
           label="Active Mandates"
           value={String(stats.activeMandates)}
-          sublabel="DeepBook only"
+          sublabel={`${formatSui(stats.authorizedBudget)} authorized`}
           icon={ShieldCheck}
         />
         <StatCard
@@ -80,6 +92,15 @@ export function OverviewView({
       </section>
 
       <WalletSummary />
+      {(loading || error) && (
+        <Card className={error ? "border-destructive/30" : undefined}>
+          <CardContent className="p-4 text-sm text-muted-foreground">
+            {loading
+              ? "Loading Mandate data from Sui RPC..."
+              : `Unable to load Mandate data from Sui RPC: ${error}`}
+          </CardContent>
+        </Card>
+      )}
       <AgentExecutionPanel />
 
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -107,7 +128,9 @@ export function OverviewView({
             ) : (
               <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
                 <p className="text-sm text-muted-foreground">
-                  No active mandates yet.
+                  {isWalletScoped
+                    ? "No mandates found for this wallet. Create a Mandate to delegate scoped authority to an agent."
+                    : "No active mandates yet."}
                 </p>
                 <Button size="sm" onClick={onCreate}>
                   <Plus data-icon="inline-start" />
