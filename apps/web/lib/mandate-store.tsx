@@ -8,7 +8,6 @@ import {
   ALL_PROTOCOLS,
   SEED_ACTIVITY,
   SEED_MANDATES,
-  SEED_ORDERS,
   type ActivityEvent,
   type DeepBookOrder,
   type Mandate,
@@ -26,6 +25,8 @@ import type { SuiEvent, SuiObjectResponse } from "@mysten/sui/jsonRpc"
 
 const USER_MANDATES_KEY = `mandate:userMandates:${NETWORK}`
 const USER_ACTIVITY_KEY = `mandate:userActivity:${NETWORK}`
+const USER_METADATA_KEY = `mandate:userMetadata:${NETWORK}`
+const USER_EXECUTIONS_KEY = `mandate:deepbookExecutions:${NETWORK}`
 
 export type NewMandateInput = {
   id?: string
@@ -57,10 +58,19 @@ type StoreContextValue = {
     mandateId: string
     digest?: string
     amountSui?: number
+    suiBalanceChange?: number
   }) => void
   togglePause: (id: string) => void
   refreshMandates: () => void
   clearUserDemoData: () => void
+}
+
+type UserMandateMetadata = {
+  mandateId: string
+  label: string
+  createdDigest?: string
+  createdAt: string
+  ttl?: string
 }
 
 const StoreContext = React.createContext<StoreContextValue | null>(null)
@@ -100,6 +110,21 @@ function clientTimeDisplay(iso: string) {
   }
 
   return `${Math.floor(hours / 24)}d ago`
+}
+
+function ttlLabel(ttl?: string) {
+  switch (ttl) {
+    case "3600000":
+      return "1h"
+    case "43200000":
+      return "12h"
+    case "86400000":
+      return "24h"
+    case "604800000":
+      return "7d"
+    default:
+      return undefined
+  }
 }
 
 function parsedJsonRecord(event: SuiEvent) {
@@ -200,7 +225,7 @@ function mapEventToActivity(event: SuiEvent): ActivityEvent | null {
   const base = {
     id: `${digest}:${event.type}:${mandateId}`,
     mandateId,
-    agentName: "Market Maker",
+    agentName: "Agent Wallet",
     protocol: "DeepBook" as const,
     timestamp,
     digest,
@@ -279,6 +304,48 @@ function uniqById<T extends { id: string }>(items: T[]) {
   })
 }
 
+function uniqExecutions(executions: DeepBookOrder[]) {
+  const seen = new Set<string>()
+  return executions.filter((execution) => {
+    const key = execution.digest || execution.id
+    if (seen.has(key)) {
+      return false
+    }
+    seen.add(key)
+    return true
+  })
+}
+
+function activityToExecution(
+  event: ActivityEvent,
+  mandate?: Mandate
+): DeepBookOrder | null {
+  if (
+    event.kind !== "tx.executed" ||
+    event.protocol !== "DeepBook" ||
+    !event.digest
+  ) {
+    return null
+  }
+
+  const timestamp = new Date(event.timestamp).getTime()
+  return {
+    id: `${event.digest}:${event.mandateId}`,
+    mandateId: event.mandateId,
+    mandateLabel: mandate?.label ?? event.agentName ?? "Mandate",
+    digest: event.digest,
+    timestamp: Number.isFinite(timestamp) ? timestamp : Date.now(),
+    protocol: "DeepBook",
+    status: "success",
+    suiBalanceChange:
+      typeof event.amountSui === "number"
+        ? -event.amountSui
+        : typeof event.amount === "number"
+          ? -event.amount
+          : undefined,
+  }
+}
+
 function readStorageArray<T>(key: string): T[] {
   if (typeof window === "undefined") {
     return []
@@ -309,6 +376,55 @@ function writeStorageArray<T>(key: string, value: T[]) {
   }
 }
 
+function readStorageRecord<T>(key: string): Record<string, T> {
+  if (typeof window === "undefined") {
+    return {}
+  }
+
+  try {
+    const raw = window.localStorage.getItem(key)
+    if (!raw) {
+      return {}
+    }
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, T>)
+      : {}
+  } catch (error) {
+    console.warn(`[MANDATE] failed to read ${key}`, error)
+    return {}
+  }
+}
+
+function writeStorageRecord<T>(key: string, value: Record<string, T>) {
+  if (typeof window === "undefined") {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value))
+  } catch (error) {
+    console.warn(`[MANDATE] failed to write ${key}`, error)
+  }
+}
+
+function mergeMandateMetadata(
+  mandate: Mandate,
+  metadata?: UserMandateMetadata
+): Mandate {
+  if (!metadata) {
+    return mandate
+  }
+
+  return {
+    ...mandate,
+    label: metadata.label || mandate.label,
+    digest: mandate.digest || metadata.createdDigest,
+    createdAt: metadata.createdAt || mandate.createdAt,
+    expiresLabel: ttlLabel(metadata.ttl) ?? mandate.expiresLabel,
+  }
+}
+
 declare global {
   interface Window {
     __MANDATE_CLEAR_USER_DEMO_DATA__?: () => void
@@ -327,16 +443,44 @@ export function MandateStoreProvider({
   const [rpcActivity, setRpcActivity] = React.useState<ActivityEvent[]>([])
   const [userMandates, setUserMandates] = React.useState<Mandate[]>([])
   const [userActivity, setUserActivity] = React.useState<ActivityEvent[]>([])
+  const [executionHistory, setExecutionHistory] = React.useState<DeepBookOrder[]>([])
+  const [userMetadata, setUserMetadata] = React.useState<
+    Record<string, UserMandateMetadata>
+  >({})
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [refreshVersion, setRefreshVersion] = React.useState(0)
-  const [orders] = React.useState<DeepBookOrder[]>(SEED_ORDERS)
 
   React.useEffect(() => {
     // Demo persistence only. P2.3 should replace this with Sui RPC/event
     // indexing for on-chain Mandate discovery.
-    setUserMandates(uniqById(readStorageArray<Mandate>(USER_MANDATES_KEY)))
-    setUserActivity(uniqById(readStorageArray<ActivityEvent>(USER_ACTIVITY_KEY)))
+    const storedMandates = uniqById(readStorageArray<Mandate>(USER_MANDATES_KEY))
+    const storedActivity = uniqById(readStorageArray<ActivityEvent>(USER_ACTIVITY_KEY))
+    const storedExecutions = uniqById(
+      readStorageArray<DeepBookOrder>(USER_EXECUTIONS_KEY)
+    )
+    const storedMetadata = readStorageRecord<UserMandateMetadata>(USER_METADATA_KEY)
+    const backfilledMetadata = storedMandates.reduce(
+      (acc, mandate) => {
+        acc[mandate.id] = acc[mandate.id] ?? {
+          mandateId: mandate.id,
+          label: mandate.label,
+          createdDigest: mandate.digest,
+          createdAt: mandate.createdAt,
+          ttl: undefined,
+        }
+        return acc
+      },
+      { ...storedMetadata } as Record<string, UserMandateMetadata>
+    )
+
+    setUserMandates(storedMandates)
+    setUserActivity(storedActivity)
+    setExecutionHistory(
+      storedExecutions.sort((a, b) => b.timestamp - a.timestamp)
+    )
+    setUserMetadata(backfilledMetadata)
+    writeStorageRecord(USER_METADATA_KEY, backfilledMetadata)
   }, [])
 
   const refreshMandates = React.useCallback(() => {
@@ -457,12 +601,19 @@ export function MandateStoreProvider({
       expiresLabel: input.expiresLabel,
       createdAtDisplay: "just now",
     }
+    const metadata: UserMandateMetadata = {
+      mandateId: mandate.id,
+      label: mandate.label,
+      createdDigest: input.digest,
+      createdAt: mandate.createdAt,
+      ttl: input.ttlMs,
+    }
 
     const createdActivity: ActivityEvent = {
       id: randomId("evt"),
       kind: "mandate.created",
       mandateId: mandate.id,
-      agentName: agent.name,
+      agentName: mandate.label,
       protocol: input.protocols[0],
       amount: input.budget,
       message: `Mandate created with ${formatSui(input.budget)} ceiling`,
@@ -482,6 +633,11 @@ export function MandateStoreProvider({
     setUserActivity((prev) => {
       const next = uniqById([createdActivity, ...prev])
       writeStorageArray(USER_ACTIVITY_KEY, next)
+      return next
+    })
+    setUserMetadata((prev) => {
+      const next = { ...prev, [mandate.id]: metadata }
+      writeStorageRecord(USER_METADATA_KEY, next)
       return next
     })
     return mandate
@@ -509,7 +665,7 @@ export function MandateStoreProvider({
         id: digest ? `${digest}:optimistic-revoke:${id}` : randomId("evt"),
         kind: "mandate.revoked",
         mandateId: id,
-        agentName: target?.agent.name ?? "Agent",
+        agentName: target?.label ?? "Agent Wallet",
         protocol: target?.protocol ?? target?.protocols[0],
         message: "Owner revoked mandate",
         timestamp: new Date().toISOString(),
@@ -533,10 +689,12 @@ export function MandateStoreProvider({
       mandateId,
       digest,
       amountSui = 0.001,
+      suiBalanceChange,
     }: {
       mandateId: string
       digest?: string
       amountSui?: number
+      suiBalanceChange?: number
     }) => {
       const incrementSpent = (mandate: Mandate) =>
         mandate.id === mandateId
@@ -565,7 +723,7 @@ export function MandateStoreProvider({
         id: digest ? `${digest}:optimistic-agent:${mandateId}` : randomId("evt"),
         kind: "tx.executed",
         mandateId,
-        agentName: target?.agent.name ?? "Market Maker",
+        agentName: target?.label ?? "Agent Wallet",
         protocol: target?.protocol ?? target?.protocols[0] ?? "DeepBook",
         amount: amountSui,
         amountSui,
@@ -581,6 +739,25 @@ export function MandateStoreProvider({
       setUserActivity((prev) => {
         const next = uniqById([executionActivity, ...prev])
         writeStorageArray(USER_ACTIVITY_KEY, next)
+        return next
+      })
+
+      const executionRecord: DeepBookOrder = {
+        id: digest ? `${digest}:${mandateId}` : randomId("exec"),
+        mandateId,
+        mandateLabel: target?.label ?? "Mandate",
+        digest: digest ?? "",
+        timestamp: Date.now(),
+        protocol: "DeepBook",
+        status: "success",
+        suiBalanceChange: suiBalanceChange ?? -amountSui,
+      }
+
+      setExecutionHistory((prev) => {
+        const next = uniqById([executionRecord, ...prev]).sort(
+          (a, b) => b.timestamp - a.timestamp
+        )
+        writeStorageArray(USER_EXECUTIONS_KEY, next)
         return next
       })
     },
@@ -615,8 +792,12 @@ export function MandateStoreProvider({
   const clearUserDemoData = React.useCallback(() => {
     window.localStorage.removeItem(USER_MANDATES_KEY)
     window.localStorage.removeItem(USER_ACTIVITY_KEY)
+    window.localStorage.removeItem(USER_METADATA_KEY)
+    window.localStorage.removeItem(USER_EXECUTIONS_KEY)
     setUserMandates([])
     setUserActivity([])
+    setUserMetadata({})
+    setExecutionHistory([])
   }, [])
 
   React.useEffect(() => {
@@ -647,15 +828,46 @@ export function MandateStoreProvider({
     const primary = account?.address
       ? [...rpcMandates, ...walletUserMandates]
       : [...walletUserMandates, ...seedMandates]
-    return uniqById(primary)
-  }, [account?.address, rpcMandates, seedMandates, walletUserMandates])
+    return uniqById(primary).map((mandate) =>
+      mergeMandateMetadata(mandate, userMetadata[mandate.id])
+    )
+  }, [account?.address, rpcMandates, seedMandates, userMandates, userMetadata, walletUserMandates])
 
   const activity = React.useMemo(() => {
     const primary = account?.address
       ? [...rpcActivity, ...walletUserActivity]
       : [...walletUserActivity, ...seedActivity]
-    return uniqActivity(primary)
-  }, [account?.address, rpcActivity, seedActivity, walletUserActivity])
+    const mandateById = new Map(mandates.map((mandate) => [mandate.id, mandate]))
+    return uniqActivity(primary).map((event) => {
+      if (!account?.address) {
+        return event
+      }
+
+      const mandate = mandateById.get(event.mandateId)
+      return {
+        ...event,
+        agentName:
+          mandate?.label ??
+          (mandate?.agentAddress ? "Agent Wallet" : event.agentName),
+      }
+    })
+  }, [account?.address, mandates, rpcActivity, seedActivity, walletUserActivity])
+
+  const orders = React.useMemo(() => {
+    const mandateById = new Map(mandates.map((mandate) => [mandate.id, mandate]))
+    const activityExecutions = (account?.address ? activity : [])
+      .map((event) => activityToExecution(event, mandateById.get(event.mandateId)))
+      .filter((execution): execution is DeepBookOrder => Boolean(execution))
+    const localExecutions = executionHistory.map((execution) => ({
+      ...execution,
+      mandateLabel:
+        mandateById.get(execution.mandateId)?.label ?? execution.mandateLabel,
+    }))
+
+    return uniqExecutions([...activityExecutions, ...localExecutions]).sort(
+      (a, b) => b.timestamp - a.timestamp
+    )
+  }, [account?.address, activity, executionHistory, mandates])
 
   const value = React.useMemo(
     () => ({

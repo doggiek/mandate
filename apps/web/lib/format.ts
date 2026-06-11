@@ -64,7 +64,7 @@ export function stableExpiryLabel(
   }
 
   const hours = Math.round(diffMs / 3600000)
-  if (hours < 24) {
+  if (hours <= 24) {
     return `${hours}h`
   }
 

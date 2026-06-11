@@ -79,14 +79,12 @@ export type OrderStatus = "filled" | "open" | "partial" | "cancelled"
 export type DeepBookOrder = {
   id: string
   mandateId: string
-  agentName: string
-  pair: string
-  side: OrderSide
-  price: number
-  size: number
-  filled: number
-  status: OrderStatus
-  timestamp: string
+  mandateLabel: string
+  digest: string
+  timestamp: number
+  protocol: "DeepBook"
+  status: "success" | "failed"
+  suiBalanceChange?: number
 }
 
 export const AGENTS: Agent[] = [
@@ -283,77 +281,4 @@ export const SEED_ACTIVITY: ActivityEvent[] = [
   },
 ]
 
-export const SEED_ORDERS: DeepBookOrder[] = [
-  {
-    id: "ord_1001",
-    mandateId: "mnd_8Fk2Lp",
-    agentName: "Market Maker",
-    pair: DEEPBOOK_POOL_KEY,
-    side: "buy",
-    price: 0.001,
-    size: 0.001,
-    filled: 0.001,
-    status: "filled",
-    timestamp: iso(0, -1),
-  },
-  {
-    id: "ord_1002",
-    mandateId: "mnd_8Fk2Lp",
-    agentName: "Market Maker",
-    pair: DEEPBOOK_POOL_KEY,
-    side: "sell",
-    price: 0.001,
-    size: 0.001,
-    filled: 0.001,
-    status: "filled",
-    timestamp: iso(0, -2),
-  },
-  {
-    id: "ord_1003",
-    mandateId: "mnd_8Fk2Lp",
-    agentName: "Market Maker",
-    pair: DEEPBOOK_POOL_KEY,
-    side: "buy",
-    price: 0.001,
-    size: 0.001,
-    filled: 0,
-    status: "open",
-    timestamp: iso(0, -3),
-  },
-  {
-    id: "ord_1004",
-    mandateId: "mnd_9Bt4Kc",
-    agentName: "Arbitrage Scout",
-    pair: DEEPBOOK_POOL_KEY,
-    side: "sell",
-    price: 0.001,
-    size: 0.001,
-    filled: 0.001,
-    status: "filled",
-    timestamp: iso(-1, -1),
-  },
-  {
-    id: "ord_1005",
-    mandateId: "mnd_8Fk2Lp",
-    agentName: "Market Maker",
-    pair: DEEPBOOK_POOL_KEY,
-    side: "buy",
-    price: 0.001,
-    size: 0.001,
-    filled: 0,
-    status: "cancelled",
-    timestamp: iso(-1, -4),
-  },
-  {
-    id: "ord_1006",
-    mandateId: "mnd_9Bt4Kc",
-    agentName: "Arbitrage Scout",
-    pair: DEEPBOOK_POOL_KEY,
-    side: "buy",
-    price: 0.001,
-    size: 0.001,
-    filled: 0.001,
-    status: "filled",
-    timestamp: iso(-2, -2),
-  },
-]
+export const SEED_ORDERS: DeepBookOrder[] = []

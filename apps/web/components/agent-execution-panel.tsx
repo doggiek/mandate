@@ -27,7 +27,7 @@ import {
   DEEPBOOK_POOL_KEY,
   VERIFIED_DEEPBOOK_DIGEST,
 } from "@/lib/chain-config"
-import { formatSui } from "@/lib/format"
+import { formatSui, stableExpiryLabel } from "@/lib/format"
 import { useMandateStore } from "@/lib/mandate-store"
 import { cn } from "@/lib/utils"
 
@@ -71,6 +71,14 @@ function mandateCreatedTime(mandate: { createdAt: string }) {
   return new Date(mandate.createdAt).getTime()
 }
 
+function mandateExpiryLabel(mandate: {
+  expiresAt: string
+  expiresLabel?: string
+  status: "active" | "expired" | "revoked" | "paused"
+}) {
+  return mandate.expiresLabel ?? stableExpiryLabel(mandate.expiresAt, mandate.status)
+}
+
 function normalizeAgentRunError(message: string) {
   const lower = message.toLowerCase()
   if (
@@ -82,6 +90,11 @@ function normalizeAgentRunError(message: string) {
   }
 
   return message
+}
+
+function parseSuiBalanceChange(value: string) {
+  const match = value.trim().match(/^(-?\d+(?:\.\d+)?)\s*SUI$/i)
+  return match ? Number(match[1]) : undefined
 }
 
 export function AgentExecutionPanel() {
@@ -156,6 +169,11 @@ export function AgentExecutionPanel() {
         copyable: false,
       },
       {
+        label: "Expiration",
+        value: selectedMandate ? mandateExpiryLabel(selectedMandate) : "-",
+        copyable: false,
+      },
+      {
         label: "Last verified digest",
         value: VERIFIED_DEEPBOOK_DIGEST,
         copyable: true,
@@ -202,6 +220,7 @@ export function AgentExecutionPanel() {
         mandateId: selectedMandate.id,
         digest: payload.digest,
         amountSui: 0.001,
+        suiBalanceChange: parseSuiBalanceChange(payload.balanceChangeSui),
       })
       refreshMandates()
     } catch (caught) {
@@ -288,6 +307,7 @@ export function AgentExecutionPanel() {
                           <span className="font-mono">{shortId(mandate.id)}</span>
                           <span>Budget {formatSui(mandate.budget)}</span>
                           <span>Max {formatSui(mandate.txLimit)}</span>
+                          <span>Expires {mandateExpiryLabel(mandate)}</span>
                         </span>
                       </span>
                     </SelectItem>
@@ -298,7 +318,7 @@ export function AgentExecutionPanel() {
           </div>
         )}
 
-        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-7">
           {executionSummary.map((item) => (
             <ResultField
               key={item.label}

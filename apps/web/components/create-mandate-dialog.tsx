@@ -55,9 +55,10 @@ const PROTOCOL_SCOPE_DEEPBOOK = 1
 const MIST_PER_SUI = BigInt(1_000_000_000)
 const SIGNING_TIMEOUT_MS = 60_000
 const EXPIRATION_OPTIONS = [
-  { label: "1 hour", value: "3600000", durationDays: 1 },
-  { label: "24 hours", value: "86400000", durationDays: 1 },
-  { label: "7 days", value: "604800000", durationDays: 7 },
+  { label: "1h", value: "3600000", durationDays: 1 },
+  { label: "12h", value: "43200000", durationDays: 1 },
+  { label: "24h", value: "86400000", durationDays: 1 },
+  { label: "7d", value: "604800000", durationDays: 7 },
 ] as const
 
 type CreateStatus = "idle" | "signing" | "success" | "error"
@@ -165,7 +166,7 @@ export function CreateMandateDialog({
   const [agentAddress, setAgentAddress] = React.useState(AGENT_WALLET_ADDRESS)
   const [budgetSui, setBudgetSui] = React.useState("0.1")
   const [txLimitSui, setTxLimitSui] = React.useState("0.01")
-  const [ttlMs, setTtlMs] = React.useState(EXPIRATION_OPTIONS[1].value)
+  const [ttlMs, setTtlMs] = React.useState(EXPIRATION_OPTIONS[2].value)
   const [isSigning, setSigning] = React.useState(false)
   const [status, setStatus] = React.useState<CreateStatus>("idle")
   const [digest, setDigest] = React.useState<string | null>(null)
@@ -221,7 +222,7 @@ export function CreateMandateDialog({
     setAgentAddress(AGENT_WALLET_ADDRESS)
     setBudgetSui("0.1")
     setTxLimitSui("0.01")
-    setTtlMs(EXPIRATION_OPTIONS[1].value)
+    setTtlMs(EXPIRATION_OPTIONS[2].value)
     setSigning(false)
     setStatus("idle")
     setDigest(null)
@@ -249,7 +250,7 @@ export function CreateMandateDialog({
     !isSigning
   const selectedExpiration =
     EXPIRATION_OPTIONS.find((option) => option.value === ttlMs) ??
-    EXPIRATION_OPTIONS[1]
+    EXPIRATION_OPTIONS[2]
 
   async function handleSubmit() {
     if (!valid) return

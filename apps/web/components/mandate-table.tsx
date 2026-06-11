@@ -48,7 +48,11 @@ export function MandateTable({
                 <div className="flex flex-col gap-0.5">
                   <span className="font-medium leading-tight">{m.label}</span>
                   <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <span className="truncate">{m.agent.name}</span>
+                    {m.agentAddress ? (
+                      <CopyableId value={m.agentAddress} label="agent wallet" />
+                    ) : (
+                      <span className="truncate">Agent Wallet</span>
+                    )}
                     <span className="text-border">·</span>
                     <CopyableId value={m.id} label="mandate id" />
                   </span>
@@ -87,7 +91,7 @@ export function MandateTable({
                       : "text-foreground"
                   )}
                 >
-                  {stableExpiryLabel(m.expiresAt, m.status)}
+                  {m.expiresLabel ?? stableExpiryLabel(m.expiresAt, m.status)}
                 </span>
               </TableCell>
               <TableCell className="pr-3 text-right">

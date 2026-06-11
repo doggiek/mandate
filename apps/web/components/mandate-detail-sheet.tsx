@@ -19,7 +19,7 @@ import {
 import { ActivityFeed } from "@/components/activity-feed"
 import { BudgetMeter } from "@/components/budget-meter"
 import { CopyableId } from "@/components/copyable-id"
-import { OrderStatusBadge, StatusBadge } from "@/components/status-badges"
+import { StatusBadge } from "@/components/status-badges"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -37,7 +37,7 @@ import {
   NETWORK,
   PACKAGE_ID,
 } from "@/lib/chain-config"
-import { formatDate, formatSui, relativeTime } from "@/lib/format"
+import { formatSui, relativeTime, stableExpiryLabel } from "@/lib/format"
 import { useMandateStore } from "@/lib/mandate-store"
 import { cn } from "@/lib/utils"
 
@@ -56,6 +56,25 @@ const MOCK_AGENT_ADDRESSES: Record<string, string> = {
 }
 
 const REVOKE_TIMEOUT_MS = 180_000
+
+function executionTime(timestamp: number) {
+  const diffMs = Date.now() - timestamp
+  if (!Number.isFinite(timestamp) || diffMs < 60_000) {
+    return "just now"
+  }
+
+  const mins = Math.floor(diffMs / 60_000)
+  if (mins < 60) {
+    return `${mins}m ago`
+  }
+
+  const hours = Math.floor(diffMs / 3_600_000)
+  if (hours < 24) {
+    return `${hours}h ago`
+  }
+
+  return `${Math.floor(hours / 24)}d ago`
+}
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error)
@@ -386,7 +405,13 @@ export function MandateDetailSheet({
                   }
                 />
                 <DetailMetric label="Protocol scope" value="DeepBook only" />
-                <DetailMetric label="Expiration" value={formatDate(mandate.expiresAt)} />
+                <DetailMetric
+                  label="Expiration"
+                  value={
+                    mandate.expiresLabel ??
+                    stableExpiryLabel(mandate.expiresAt, mandate.status)
+                  }
+                />
               </section>
 
               <section className="rounded-xl border border-border bg-card/60">
@@ -412,52 +437,51 @@ export function MandateDetailSheet({
 
               <section className="rounded-xl border border-border bg-card/60">
                 <div className="p-4">
-                  <h3 className="text-sm font-medium">Related DeepBook orders</h3>
+                  <h3 className="text-sm font-medium">
+                    Related DeepBook executions
+                  </h3>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Mock order history linked to this mandate.
+                    Successful Run Agent records linked to this mandate.
                   </p>
                 </div>
                 <Separator />
                 <div className="divide-y divide-border">
                   {mandateOrders.length > 0 ? (
-                    mandateOrders.map((order) => (
+                    mandateOrders.map((execution) => (
                       <div
-                        key={order.id}
+                        key={execution.id}
                         className="grid grid-cols-[1fr_auto] gap-3 px-4 py-3"
                       >
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
-                            <p className="font-mono text-sm text-foreground">
-                              {order.pair}
-                            </p>
+                            <CopyableId
+                              value={execution.digest}
+                              label="digest"
+                              className="text-sm text-foreground"
+                            />
                             <Badge
                               variant="outline"
-                              className={cn(
-                                "capitalize",
-                                order.side === "buy"
-                                  ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
-                                  : "border-sky-500/25 bg-sky-500/10 text-sky-400"
-                              )}
+                              className="border-emerald-500/25 bg-emerald-500/10 capitalize text-emerald-400"
                             >
-                              {order.side}
+                              {execution.status}
                             </Badge>
                           </div>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {order.filled}/{order.size} filled ·{" "}
-                            {relativeTime(order.timestamp)}
+                            {execution.protocol} · {executionTime(execution.timestamp)}
                           </p>
                         </div>
                         <div className="flex flex-col items-end gap-1">
-                          <OrderStatusBadge status={order.status} />
                           <span className="font-mono text-xs text-muted-foreground">
-                            {order.price}
+                            {typeof execution.suiBalanceChange === "number"
+                              ? formatSui(execution.suiBalanceChange)
+                              : "-"}
                           </span>
                         </div>
                       </div>
                     ))
                   ) : (
                     <p className="px-4 py-5 text-sm text-muted-foreground">
-                      No DeepBook orders linked yet.
+                      No DeepBook executions linked yet.
                     </p>
                   )}
                 </div>
