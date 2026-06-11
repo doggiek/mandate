@@ -14,7 +14,7 @@ import {
   type Mandate,
   type Protocol,
 } from "@/lib/mandate-data"
-import { formatSui, relativeTime, stableExpiryLabel } from "@/lib/format"
+import { formatSui, stableExpiryLabel } from "@/lib/format"
 import {
   getMandateObject,
   queryMandateActivityEvents,
@@ -52,8 +52,9 @@ type StoreContextValue = {
   error: string | null
   isWalletScoped: boolean
   createMandate: (input: NewMandateInput) => Mandate
-  revokeMandate: (id: string) => void
+  revokeMandate: (id: string, digest?: string) => void
   togglePause: (id: string) => void
+  refreshMandates: () => void
   clearUserDemoData: () => void
 }
 
@@ -72,6 +73,28 @@ function toggledStatus(status: Mandate["status"]): Mandate["status"] {
 function mistToSui(value: unknown) {
   const numeric = typeof value === "number" ? value : Number(value ?? 0)
   return numeric / 1_000_000_000
+}
+
+function clientTimeDisplay(iso: string) {
+  const then = new Date(iso).getTime()
+  const now = Date.now()
+  const diffMs = now - then
+
+  if (!Number.isFinite(then) || diffMs < 60_000) {
+    return "just now"
+  }
+
+  const mins = Math.floor(diffMs / 60_000)
+  if (mins < 60) {
+    return `${mins}m ago`
+  }
+
+  const hours = Math.floor(diffMs / 3_600_000)
+  if (hours < 24) {
+    return `${hours}h ago`
+  }
+
+  return `${Math.floor(hours / 24)}d ago`
 }
 
 function parsedJsonRecord(event: SuiEvent) {
@@ -152,7 +175,7 @@ function mapCreatedEventToMandate(
     protocol: "DeepBook",
     expiresLabel: stableExpiryLabel(expiresAt, status),
     createdAtDisplay: event.timestampMs
-      ? relativeTime(new Date(Number(event.timestampMs)).toISOString())
+      ? clientTimeDisplay(new Date(Number(event.timestampMs)).toISOString())
       : undefined,
   }
 }
@@ -176,7 +199,7 @@ function mapEventToActivity(event: SuiEvent): ActivityEvent | null {
     protocol: "DeepBook" as const,
     timestamp,
     digest,
-    timeDisplay: relativeTime(timestamp),
+    timeDisplay: clientTimeDisplay(timestamp),
   }
 
   if (event.type.endsWith("CreatedEvent")) {
@@ -301,6 +324,7 @@ export function MandateStoreProvider({
   const [userActivity, setUserActivity] = React.useState<ActivityEvent[]>([])
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const [refreshVersion, setRefreshVersion] = React.useState(0)
   const [orders] = React.useState<DeepBookOrder[]>(SEED_ORDERS)
 
   React.useEffect(() => {
@@ -308,6 +332,10 @@ export function MandateStoreProvider({
     // indexing for on-chain Mandate discovery.
     setUserMandates(uniqById(readStorageArray<Mandate>(USER_MANDATES_KEY)))
     setUserActivity(uniqById(readStorageArray<ActivityEvent>(USER_ACTIVITY_KEY)))
+  }, [])
+
+  const refreshMandates = React.useCallback(() => {
+    setRefreshVersion((version) => version + 1)
   }, [])
 
   React.useEffect(() => {
@@ -389,7 +417,7 @@ export function MandateStoreProvider({
     return () => {
       cancelled = true
     }
-  }, [account?.address])
+  }, [account?.address, refreshVersion])
 
   const createMandate = React.useCallback((input: NewMandateInput): Mandate => {
     const agent = AGENTS.find((a) => a.id === input.agentId) ?? AGENTS[0]
@@ -422,7 +450,7 @@ export function MandateStoreProvider({
       maxSingleTxSui: input.txLimit,
       protocol: input.protocols[0],
       expiresLabel: input.expiresLabel,
-      createdAtDisplay: "Just now",
+      createdAtDisplay: "just now",
     }
 
     const createdActivity: ActivityEvent = {
@@ -438,7 +466,7 @@ export function MandateStoreProvider({
       title: "Mandate created",
       status: "created",
       amountSui: input.budget,
-      timeDisplay: "Just now",
+      timeDisplay: "just now",
     }
 
     setUserMandates((prev) => {
@@ -455,7 +483,7 @@ export function MandateStoreProvider({
   }, [])
 
   const revokeMandate = React.useCallback(
-    (id: string) => {
+    (id: string, digest?: string) => {
       setUserMandates((prev) => {
         const next = prev.map((m) =>
           m.id === id ? { ...m, status: "revoked" as const } : m
@@ -466,26 +494,33 @@ export function MandateStoreProvider({
       setSeedMandates((prev) =>
         prev.map((m) => (m.id === id ? { ...m, status: "revoked" } : m))
       )
-      const target = [...userMandates, ...seedMandates].find((m) => m.id === id)
+      setRpcMandates((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, status: "revoked" } : m))
+      )
+      const target = [...rpcMandates, ...userMandates, ...seedMandates].find(
+        (m) => m.id === id
+      )
       const revokedActivity: ActivityEvent = {
-        id: randomId("evt"),
+        id: digest ? `${digest}:optimistic-revoke:${id}` : randomId("evt"),
         kind: "mandate.revoked",
         mandateId: id,
         agentName: target?.agent.name ?? "Agent",
         protocol: target?.protocol ?? target?.protocols[0],
-        message: "Mandate revoked by owner — all authority withdrawn",
+        message: "Owner revoked mandate",
         timestamp: new Date().toISOString(),
-        title: "Mandate revoked",
+        digest,
+        title: "Owner revoked mandate",
         status: "revoked",
-        timeDisplay: "Just now",
+        timeDisplay: "just now",
       }
+      setRpcActivity((prev) => uniqActivity([revokedActivity, ...prev]))
       setUserActivity((prev) => {
         const next = uniqById([revokedActivity, ...prev])
         writeStorageArray(USER_ACTIVITY_KEY, next)
         return next
       })
     },
-    [seedMandates, userMandates]
+    [rpcMandates, seedMandates, userMandates]
   )
 
   const togglePause = React.useCallback((id: string) => {
@@ -569,6 +604,7 @@ export function MandateStoreProvider({
       createMandate,
       revokeMandate,
       togglePause,
+      refreshMandates,
       clearUserDemoData,
     }),
     [
@@ -581,6 +617,7 @@ export function MandateStoreProvider({
       createMandate,
       revokeMandate,
       togglePause,
+      refreshMandates,
       clearUserDemoData,
     ]
   )

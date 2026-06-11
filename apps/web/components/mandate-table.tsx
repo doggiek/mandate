@@ -11,6 +11,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { StatusBadge } from "@/components/status-badges"
 import { BudgetMeter } from "@/components/budget-meter"
+import { CopyableId } from "@/components/copyable-id"
 import { cn } from "@/lib/utils"
 import { stableExpiryLabel } from "@/lib/format"
 import type { Mandate } from "@/lib/mandate-data"
@@ -49,7 +50,7 @@ export function MandateTable({
                   <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <span className="truncate">{m.agent.name}</span>
                     <span className="text-border">·</span>
-                    <span className="font-mono">{m.id}</span>
+                    <CopyableId value={m.id} label="mandate id" />
                   </span>
                 </div>
               </TableCell>

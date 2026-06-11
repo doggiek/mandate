@@ -1,10 +1,19 @@
 "use client"
 
 import { cn } from "@/lib/utils"
+import { CopyableId } from "@/components/copyable-id"
 import { ActivityBadge } from "@/components/status-badges"
-import { formatConfigId } from "@/lib/chain-config"
 import { formatSui, relativeTime } from "@/lib/format"
 import type { ActivityEvent } from "@/lib/mandate-data"
+
+function activityTimeLabel(event: ActivityEvent) {
+  const label = event.timeDisplay ?? relativeTime(event.timestamp)
+  if (label.startsWith("in ")) {
+    return "just now"
+  }
+
+  return label === "Just now" ? "just now" : label
+}
 
 export function ActivityFeed({
   events,
@@ -39,11 +48,11 @@ export function ActivityFeed({
               {e.digest && (
                 <>
                   <span className="text-border">·</span>
-                  <span className="font-mono">{formatConfigId(e.digest, 6, 5)}</span>
+                  <CopyableId value={e.digest} label="digest" />
                 </>
               )}
               <span className="text-border">·</span>
-              <span className="font-mono">{formatConfigId(e.mandateId, 6, 5)}</span>
+              <CopyableId value={e.mandateId} label="mandate id" />
             </div>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-0.5">
@@ -59,7 +68,7 @@ export function ActivityFeed({
               </span>
             )}
             <span className="text-xs text-muted-foreground tabular-nums">
-              {e.timeDisplay ?? relativeTime(e.timestamp)}
+              {activityTimeLabel(e)}
             </span>
           </div>
         </li>

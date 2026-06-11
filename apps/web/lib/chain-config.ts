@@ -26,7 +26,7 @@ export const VERIFIED_DEEPBOOK_DIGEST =
   process.env.NEXT_PUBLIC_VERIFIED_DEEPBOOK_DIGEST ??
   "DkV1SdVQhYw8U8ErQzkVZH225LkPqBeKtJBzkLk6PSfX"
 
-export function formatConfigId(value: string, prefixLength = 10, suffixLength = 8) {
+export function formatConfigId(value: string, prefixLength = 6, suffixLength = 4) {
   return `${value.slice(0, prefixLength)}...${value.slice(-suffixLength)}`
 }
 

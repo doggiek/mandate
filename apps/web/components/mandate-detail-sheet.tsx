@@ -2,6 +2,13 @@
 
 import * as React from "react"
 import {
+  useCurrentAccount,
+  useSignAndExecuteTransaction,
+  useSuiClient,
+} from "@mysten/dapp-kit"
+import { Transaction } from "@mysten/sui/transactions"
+import type { SuiTransactionBlockResponse } from "@mysten/sui/jsonRpc"
+import {
   AlertTriangle,
   Ban,
   CheckCircle2,
@@ -11,6 +18,7 @@ import {
 
 import { ActivityFeed } from "@/components/activity-feed"
 import { BudgetMeter } from "@/components/budget-meter"
+import { CopyableId } from "@/components/copyable-id"
 import { OrderStatusBadge, StatusBadge } from "@/components/status-badges"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -24,9 +32,10 @@ import {
 } from "@/components/ui/sheet"
 import { Separator } from "@/components/ui/separator"
 import {
+  CLOCK_OBJECT_ID,
   DEEPBOOK_POOL_KEY,
   NETWORK,
-  formatConfigId,
+  PACKAGE_ID,
 } from "@/lib/chain-config"
 import { formatDate, formatSui, relativeTime } from "@/lib/format"
 import { useMandateStore } from "@/lib/mandate-store"
@@ -46,15 +55,37 @@ const MOCK_AGENT_ADDRESSES: Record<string, string> = {
     "0x39e71fabc50486d2a8f11c64b0ef5d9229a30478c2dc77a91ef4b6306dd9c5af",
 }
 
-function compactAddress(address: string) {
-  return `${address.slice(0, 8)}...${address.slice(-6)}`
+const REVOKE_TIMEOUT_MS = 180_000
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
 }
 
-function fakeDigest() {
-  const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-  return Array.from({ length: 44 }, () =>
-    alphabet[Math.floor(Math.random() * alphabet.length)]
-  ).join("")
+function isCancellationLikeError(error: unknown) {
+  const message = getErrorMessage(error).toLowerCase()
+  return (
+    message.includes("cancel") ||
+    message.includes("reject") ||
+    message.includes("interrupt") ||
+    message.includes("timeout") ||
+    message.includes("closed") ||
+    message.includes("user denied")
+  )
+}
+
+function withRevokeTimeout<T>(promise: Promise<T>) {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error("Wallet signing timeout or interruption"))
+    }, REVOKE_TIMEOUT_MS)
+  })
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId) {
+      clearTimeout(timeoutId)
+    }
+  })
 }
 
 function DetailMetric({
@@ -89,9 +120,22 @@ export function MandateDetailSheet({
   mandateId: string | null
   onOpenChange: (open: boolean) => void
 }) {
-  const { mandates, activity, orders, revokeMandate } = useMandateStore()
+  const {
+    mandates,
+    activity,
+    orders,
+    revokeMandate,
+    refreshMandates,
+  } = useMandateStore()
+  const account = useCurrentAccount()
+  const client = useSuiClient()
   const [confirmingRevoke, setConfirmingRevoke] = React.useState(false)
   const [revokeDigest, setRevokeDigest] = React.useState<string | null>(null)
+  const [isRevoking, setRevoking] = React.useState(false)
+  const [revokeError, setRevokeError] = React.useState<string | null>(null)
+  const sheetBodyRef = React.useRef<HTMLDivElement | null>(null)
+  const revokeConfirmRef = React.useRef<HTMLElement | null>(null)
+  const closeTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const mandate = mandates.find((item) => item.id === mandateId)
   const mandateActivity = activity
@@ -104,7 +148,40 @@ export function MandateDetailSheet({
   React.useEffect(() => {
     setConfirmingRevoke(false)
     setRevokeDigest(null)
+    setRevokeError(null)
+    setRevoking(false)
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current)
+      closeTimeoutRef.current = null
+    }
+    sheetBodyRef.current?.scrollTo({ top: 0 })
   }, [mandateId])
+
+  React.useEffect(() => {
+    return () => {
+      if (closeTimeoutRef.current) {
+        clearTimeout(closeTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  React.useEffect(() => {
+    if (!confirmingRevoke) {
+      return
+    }
+
+    const container = sheetBodyRef.current
+    const target = revokeConfirmRef.current
+    if (!container || !target) {
+      return
+    }
+
+    const targetTop = target.offsetTop - container.offsetTop - 16
+    container.scrollTo({
+      top: Math.max(targetTop, 0),
+      behavior: "smooth",
+    })
+  }, [confirmingRevoke])
 
   const remaining = mandate ? Math.max(mandate.budget - mandate.spent, 0) : 0
   const agentAddress = mandate
@@ -113,20 +190,80 @@ export function MandateDetailSheet({
       MOCK_AGENT_ADDRESSES.ag_market
     : MOCK_AGENT_ADDRESSES.ag_market
   const ownerAddress = mandate?.ownerAddress ?? MOCK_OWNER_ADDRESS
+  const canRevoke = mandate?.status === "active"
+  const isOwnerWallet =
+    !mandate?.ownerAddress ||
+    account?.address?.toLowerCase() === mandate.ownerAddress.toLowerCase()
 
-  const handleRevoke = () => {
-    if (!mandate || mandate.status === "revoked") return
-    revokeMandate(mandate.id)
-    setRevokeDigest(fakeDigest())
-    setConfirmingRevoke(false)
+  const signAndExecute = useSignAndExecuteTransaction<SuiTransactionBlockResponse>({
+    execute: ({ bytes, signature }) =>
+      client.executeTransactionBlock({
+        transactionBlock: bytes,
+        signature,
+        requestType: "WaitForLocalExecution",
+        options: {
+          showEffects: true,
+          showEvents: true,
+          showObjectChanges: true,
+        },
+      }),
+  })
+
+  const handleRevoke = async () => {
+    if (!mandate || !canRevoke || isRevoking) return
+
+    if (!isOwnerWallet) {
+      setRevokeError("Only the owner wallet can revoke this mandate.")
+      setConfirmingRevoke(false)
+      return
+    }
+
+    setRevoking(true)
+    setRevokeError(null)
+
+    try {
+      const tx = new Transaction()
+      tx.moveCall({
+        target: `${PACKAGE_ID}::mandate::revoke_mandate`,
+        arguments: [tx.object(mandate.id), tx.object(CLOCK_OBJECT_ID)],
+      })
+
+      const result = await withRevokeTimeout(
+        signAndExecute.mutateAsync({ transaction: tx })
+      )
+      const executionStatus = result.effects?.status
+
+      if (executionStatus?.status !== "success") {
+        throw new Error(executionStatus?.error ?? "Transaction failed")
+      }
+
+      setRevokeDigest(result.digest)
+      revokeMandate(mandate.id, result.digest)
+      setConfirmingRevoke(false)
+      refreshMandates()
+      if (closeTimeoutRef.current) {
+        clearTimeout(closeTimeoutRef.current)
+      }
+      closeTimeoutRef.current = setTimeout(() => {
+        onOpenChange(false)
+      }, 800)
+    } catch (caught) {
+      setRevokeError(
+        isCancellationLikeError(caught)
+          ? "Transaction was cancelled or interrupted. Please try again."
+          : getErrorMessage(caught)
+      )
+    } finally {
+      setRevoking(false)
+    }
   }
 
   return (
-    <Sheet open={Boolean(mandateId)} onOpenChange={onOpenChange}>
-      <SheetContent className="!fixed !right-0 !top-0 z-50 !h-screen w-full overflow-y-auto border-border bg-background/95 p-0 backdrop-blur-xl sm:max-w-xl">
+    <Sheet modal="trap-focus" open={Boolean(mandateId)} onOpenChange={onOpenChange}>
+      <SheetContent className="!fixed !right-0 !top-0 z-50 !h-screen w-full overflow-hidden border-border bg-background/95 p-0 backdrop-blur-xl sm:max-w-xl">
         {mandate ? (
           <>
-            <SheetHeader className="border-b border-border p-5">
+            <SheetHeader className="shrink-0 border-b border-border p-5">
               <div className="flex items-start justify-between gap-4 pr-8">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
@@ -138,9 +275,13 @@ export function MandateDetailSheet({
                   <SheetTitle className="mt-3 truncate text-xl">
                     {mandate.label}
                   </SheetTitle>
-                  <SheetDescription className="font-mono">
-                    {formatConfigId(mandate.id)} · {NETWORK}
+                  <SheetDescription className="sr-only">
+                    Mandate object on {NETWORK}
                   </SheetDescription>
+                  <div className="mt-1 flex min-w-0 items-center gap-1 text-sm text-muted-foreground">
+                    <CopyableId value={mandate.id} label="mandate id" /> ·{" "}
+                    {NETWORK}
+                  </div>
                 </div>
                 <Badge
                   variant="outline"
@@ -151,7 +292,10 @@ export function MandateDetailSheet({
               </div>
             </SheetHeader>
 
-            <div className="flex flex-col gap-5 p-5">
+            <div
+              ref={sheetBodyRef}
+              className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-5"
+            >
               {mandate.status === "revoked" && (
                 <Alert
                   variant="destructive"
@@ -169,13 +313,26 @@ export function MandateDetailSheet({
               {revokeDigest && (
                 <Alert className="border-primary/25 bg-primary/10">
                   <CheckCircle2 className="size-4 text-primary" />
-                  <AlertTitle>Mock revoke transaction recorded</AlertTitle>
+                  <AlertTitle>Status: Revoked</AlertTitle>
                   <AlertDescription>
                     Digest{" "}
-                    <span className="font-mono text-foreground">
-                      {revokeDigest}
-                    </span>
+                    <CopyableId
+                      value={revokeDigest}
+                      label="revoke digest"
+                      className="text-foreground"
+                    />
                   </AlertDescription>
+                </Alert>
+              )}
+
+              {revokeError && (
+                <Alert
+                  variant="destructive"
+                  className="border-destructive/30 bg-destructive/10"
+                >
+                  <AlertTriangle className="size-4" />
+                  <AlertTitle>Unable to revoke mandate</AlertTitle>
+                  <AlertDescription>{revokeError}</AlertDescription>
                 </Alert>
               )}
 
@@ -219,17 +376,13 @@ export function MandateDetailSheet({
                 <DetailMetric
                   label="Owner address"
                   value={
-                    <span className="block truncate font-mono">
-                      {compactAddress(ownerAddress)}
-                    </span>
+                    <CopyableId value={ownerAddress} label="owner address" />
                   }
                 />
                 <DetailMetric
                   label="Agent address"
                   value={
-                    <span className="block truncate font-mono">
-                      {compactAddress(agentAddress)}
-                    </span>
+                    <CopyableId value={agentAddress} label="agent address" />
                   }
                 />
                 <DetailMetric label="Protocol scope" value="DeepBook only" />
@@ -310,7 +463,10 @@ export function MandateDetailSheet({
                 </div>
               </section>
 
-              <section className="rounded-xl border border-border bg-card/60 p-4">
+              <section
+                ref={revokeConfirmRef}
+                className="rounded-xl border border-border bg-card/60 p-4"
+              >
                 {confirmingRevoke ? (
                   <Alert
                     variant="destructive"
@@ -319,20 +475,22 @@ export function MandateDetailSheet({
                     <AlertTriangle className="size-4" />
                     <AlertTitle>Revoke this mandate?</AlertTitle>
                     <AlertDescription>
-                      The agent will immediately lose spending authority in the
-                      mocked console state.
+                      The agent will immediately lose spending authority under
+                      the on-chain Move policy.
                     </AlertDescription>
                     <div className="col-start-2 mt-3 flex flex-wrap gap-2">
                       <Button
                         size="sm"
                         variant="destructive"
                         onClick={handleRevoke}
+                        disabled={isRevoking}
                       >
-                        Confirm revoke
+                        {isRevoking ? "Revoking" : "Confirm revoke"}
                       </Button>
                       <Button
                         size="sm"
                         variant="outline"
+                        disabled={isRevoking}
                         onClick={() => setConfirmingRevoke(false)}
                       >
                         Cancel
@@ -344,16 +502,16 @@ export function MandateDetailSheet({
                     <div>
                       <h3 className="text-sm font-medium">Owner controls</h3>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Revocation is mocked here; the Move policy path is
-                        already implemented separately.
+                        Revocation is signed by the owner wallet and enforced
+                        by the Mandate Move policy.
                       </p>
                     </div>
                     <Button
                       variant="destructive"
-                      disabled={mandate.status === "revoked"}
+                      disabled={!canRevoke || isRevoking}
                       onClick={() => setConfirmingRevoke(true)}
                     >
-                      Revoke Mandate
+                      {isRevoking ? "Revoking" : "Revoke Mandate"}
                     </Button>
                   </div>
                 )}

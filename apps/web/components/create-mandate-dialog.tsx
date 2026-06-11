@@ -30,6 +30,7 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group"
+import { CopyableId, shortId } from "@/components/copyable-id"
 import {
   Select,
   SelectContent,
@@ -46,7 +47,6 @@ import {
   CLOCK_OBJECT_ID,
   NETWORK,
   PACKAGE_ID,
-  formatConfigId,
 } from "@/lib/chain-config"
 import { Loader2 } from "lucide-react"
 
@@ -285,7 +285,7 @@ export function CreateMandateDialog({
       setCreatedMandateId(mandateId)
       setStatus("success")
       toast.success("Mandate created on-chain", {
-        description: `${formatConfigId(mandateId)} · ${formatConfigId(result.digest, 6, 5)}`,
+        description: `${shortId(mandateId)} · ${shortId(result.digest)}`,
       })
     } catch (caught) {
       console.error("[MANDATE] failed", caught)
@@ -432,17 +432,27 @@ export function CreateMandateDialog({
                 <div className="mt-2 grid gap-1.5 text-xs">
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Digest</span>
-                    <span className="min-w-0 truncate font-mono text-zinc-100">
-                      {digest ? formatConfigId(digest, 8, 6) : "-"}
-                    </span>
+                    {digest ? (
+                      <CopyableId
+                        value={digest}
+                        label="digest"
+                        className="text-zinc-100"
+                      />
+                    ) : (
+                      <span className="text-zinc-100">-</span>
+                    )}
                   </div>
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Mandate ID</span>
-                    <span className="min-w-0 truncate font-mono text-zinc-100">
-                      {createdMandateId
-                        ? formatConfigId(createdMandateId, 8, 6)
-                        : "-"}
-                    </span>
+                    {createdMandateId ? (
+                      <CopyableId
+                        value={createdMandateId}
+                        label="mandate id"
+                        className="text-zinc-100"
+                      />
+                    ) : (
+                      <span className="text-zinc-100">-</span>
+                    )}
                   </div>
                 </div>
               </div>

@@ -14,11 +14,11 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { CopyableId } from "@/components/copyable-id"
 import {
   CURRENT_MANDATE_ID,
   DEEPBOOK_POOL_KEY,
   VERIFIED_DEEPBOOK_DIGEST,
-  formatConfigId,
 } from "@/lib/chain-config"
 import { cn } from "@/lib/utils"
 
@@ -31,12 +31,27 @@ type AgentRunResult = {
   error?: string
 }
 
+const AGENT_WALLET_ADDRESS =
+  "0x91dc52b8d4b6e7815f4c7a2fb9b4384f7b32d1f0c69a4f1be265a8d94dd8b2c1"
+
 const EXECUTION_SUMMARY = [
-  ["Agent Wallet", "0x91dc...ad8b2"],
-  ["Mandate ID", formatConfigId(CURRENT_MANDATE_ID)],
-  ["Strategy", `Swap 0.001 SUI through DeepBook ${DEEPBOOK_POOL_KEY}`],
-  ["Policy", "DeepBook only / Max tx 0.01 SUI / 24h expiry"],
-  ["Last verified digest", formatConfigId(VERIFIED_DEEPBOOK_DIGEST, 6, 5)],
+  { label: "Agent Wallet", value: AGENT_WALLET_ADDRESS, copyable: true },
+  { label: "Mandate ID", value: CURRENT_MANDATE_ID, copyable: true },
+  {
+    label: "Strategy",
+    value: `Swap 0.001 SUI through DeepBook ${DEEPBOOK_POOL_KEY}`,
+    copyable: false,
+  },
+  {
+    label: "Policy",
+    value: "DeepBook only / Max tx 0.01 SUI / 24h expiry",
+    copyable: false,
+  },
+  {
+    label: "Last verified digest",
+    value: VERIFIED_DEEPBOOK_DIGEST,
+    copyable: true,
+  },
 ] as const
 
 function ResultField({
@@ -117,12 +132,18 @@ export function AgentExecutionPanel() {
       </CardHeader>
       <CardContent className="flex flex-col gap-4 p-4">
         <div className="grid gap-3 md:grid-cols-5">
-          {EXECUTION_SUMMARY.map(([label, value]) => (
+          {EXECUTION_SUMMARY.map((item) => (
             <ResultField
-              key={label}
-              label={label}
-              value={value}
-              mono={label !== "Strategy" && label !== "Policy"}
+              key={item.label}
+              label={item.label}
+              value={
+                item.copyable ? (
+                  <CopyableId value={item.value} label={item.label.toLowerCase()} />
+                ) : (
+                  item.value
+                )
+              }
+              mono={item.label !== "Strategy" && item.label !== "Policy"}
             />
           ))}
         </div>
@@ -132,7 +153,13 @@ export function AgentExecutionPanel() {
             <div className="grid gap-3 md:grid-cols-5">
               <ResultField
                 label="Digest"
-                value={result.digest || "Not returned"}
+                value={
+                  result.digest ? (
+                    <CopyableId value={result.digest} label="digest" />
+                  ) : (
+                    "Not returned"
+                  )
+                }
                 mono
               />
               <ResultField

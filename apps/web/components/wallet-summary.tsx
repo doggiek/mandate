@@ -1,6 +1,7 @@
 "use client"
 
 import { useCurrentAccount } from "@mysten/dapp-kit"
+import type * as React from "react"
 
 import {
   Card,
@@ -9,16 +10,22 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { formatAddress } from "@/components/wallet-connect-button"
+import { CopyableId } from "@/components/copyable-id"
 import { NETWORK_LABEL } from "@/lib/chain-config"
 
-function SummaryItem({ label, value }: { label: string; value: string }) {
+function SummaryItem({
+  label,
+  value,
+}: {
+  label: string
+  value: React.ReactNode
+}) {
   return (
     <div className="rounded-lg border border-border bg-background/60 p-3">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 truncate font-mono text-sm font-medium text-foreground">
+      <div className="mt-1 min-w-0 truncate font-mono text-sm font-medium text-foreground">
         {value}
-      </p>
+      </div>
     </div>
   )
 }
@@ -37,7 +44,17 @@ export function WalletSummary() {
       <CardContent className="grid gap-3 p-4 md:grid-cols-3">
         <SummaryItem
           label="Connected Wallet"
-          value={account ? formatAddress(account.address) : "Not connected"}
+          value={
+            account ? (
+              <CopyableId
+                value={account.address}
+                label="wallet address"
+                className="text-foreground"
+              />
+            ) : (
+              "Not connected"
+            )
+          }
         />
         <SummaryItem label="Network" value={NETWORK_LABEL} />
         <SummaryItem

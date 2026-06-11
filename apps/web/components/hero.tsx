@@ -79,7 +79,7 @@ function MandateCard() {
             <div>
               <p className="text-sm font-medium leading-none">Active mandate</p>
               <p className="mt-1 font-mono text-xs text-muted-foreground">
-                0x7a3f…e9c4
+                0x7a3f...e9c4
               </p>
             </div>
           </div>

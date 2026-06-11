@@ -107,7 +107,7 @@ function iso(daysFromNow: number, hoursOffset = 0): string {
 }
 
 const MOCK_NETWORK = NETWORK as Mandate["network"]
-const VERIFIED_DIGEST_SHORT = formatConfigId(VERIFIED_DEEPBOOK_DIGEST, 6, 5)
+const VERIFIED_DIGEST_SHORT = formatConfigId(VERIFIED_DEEPBOOK_DIGEST)
 const MANDATE_ID_SHORT = formatConfigId(CURRENT_MANDATE_ID)
 
 export const SEED_MANDATES: Mandate[] = [
@@ -279,7 +279,7 @@ export const SEED_ACTIVITY: ActivityEvent[] = [
     amount: 0.001,
     message: `DeepBook only policy checked for ${DEEPBOOK_POOL_KEY} route`,
     timestamp: iso(-2, -4),
-    digest: "0x7d12…aa55",
+    digest: "0x7d12...aa55",
   },
 ]
 

@@ -6,9 +6,10 @@ import {
   useDisconnectWallet,
 } from "@mysten/dapp-kit"
 import * as React from "react"
-import { Check, Copy, LogOut, Wallet } from "lucide-react"
+import { LogOut, Wallet } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { CopyableId, shortId } from "@/components/copyable-id"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,7 +23,7 @@ import { NETWORK_LABEL } from "@/lib/chain-config"
 import { cn } from "@/lib/utils"
 
 export function formatAddress(address: string) {
-  return `${address.slice(0, 10)}...${address.slice(-8)}`
+  return shortId(address)
 }
 
 export function WalletConnectButton({
@@ -36,21 +37,6 @@ export function WalletConnectButton({
 }) {
   const account = useCurrentAccount()
   const disconnectWallet = useDisconnectWallet()
-  const [copied, setCopied] = React.useState(false)
-
-  React.useEffect(() => {
-    if (!copied) return
-
-    const timeout = window.setTimeout(() => setCopied(false), 1500)
-    return () => window.clearTimeout(timeout)
-  }, [copied])
-
-  const copyAddress = async () => {
-    if (!account) return
-
-    await navigator.clipboard.writeText(account.address)
-    setCopied(true)
-  }
 
   if (!account) {
     return (
@@ -98,18 +84,11 @@ export function WalletConnectButton({
           <DropdownMenuLabel>Wallet</DropdownMenuLabel>
           <div className="px-1.5 py-1.5">
             <div className="flex min-w-0 items-center gap-2">
-              <p className="min-w-0 flex-1 truncate font-mono text-sm font-medium text-foreground">
-                {formatAddress(account.address)}
-              </p>
-              <Button
-                size="xs"
-                variant="ghost"
-                className="h-6 shrink-0 px-1.5 text-xs"
-                onClick={copyAddress}
-              >
-                {copied ? <Check /> : <Copy />}
-                {copied ? "Copied" : "Copy"}
-              </Button>
+              <CopyableId
+                value={account.address}
+                label="wallet address"
+                className="text-sm font-medium text-foreground"
+              />
             </div>
             <p className="mt-1 text-xs uppercase tracking-wider text-muted-foreground">
               Network / {NETWORK_LABEL}
