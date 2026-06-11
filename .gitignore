@@ -1,2 +1,7 @@
+.env
+node_modules/
 build/
-.envnpm install
+.next/
+apps/web/node_modules/
+apps/web/.next/
+contracts/build/
