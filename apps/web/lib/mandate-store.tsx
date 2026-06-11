@@ -14,6 +14,7 @@ import {
 } from "@/lib/mandate-data"
 
 export type NewMandateInput = {
+  id?: string
   label: string
   agentId: string
   budget: number
@@ -55,7 +56,7 @@ export function MandateStoreProvider({
     expires.setDate(expires.getDate() + input.durationDays)
 
     const mandate: Mandate = {
-      id: randomId("mnd"),
+      id: input.id ?? randomId("mnd"),
       label: input.label,
       agent,
       status: "active",

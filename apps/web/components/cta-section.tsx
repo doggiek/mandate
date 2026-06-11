@@ -1,6 +1,8 @@
 import { ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
+const COPYRIGHT_YEAR = 2026
+
 export function CtaSection() {
   return (
     <section id="cta" className="relative border-t border-border py-24 sm:py-32">
@@ -63,7 +65,7 @@ export function SiteFooter() {
         </nav>
 
         <p className="font-mono text-xs text-muted-foreground">
-          © {new Date().getFullYear()} Mandate Labs
+          © {COPYRIGHT_YEAR} Mandate Labs
         </p>
       </div>
     </footer>

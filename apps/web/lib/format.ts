@@ -1,3 +1,5 @@
+export const DEMO_NOW_ISO = "2026-06-11T04:00:00.000Z"
+
 export function formatUsd(n: number, opts?: { compact?: boolean }): string {
   if (opts?.compact && Math.abs(n) >= 1000) {
     return new Intl.NumberFormat("en-US", {
@@ -20,9 +22,9 @@ export function formatNumber(n: number, maxFractionDigits = 2): string {
   }).format(n)
 }
 
-export function relativeTime(iso: string): string {
+export function relativeTime(iso: string, referenceIso = DEMO_NOW_ISO): string {
   const then = new Date(iso).getTime()
-  const now = Date.now()
+  const now = new Date(referenceIso).getTime()
   const diffMs = then - now
   const abs = Math.abs(diffMs)
   const mins = Math.round(abs / 60000)
@@ -38,11 +40,36 @@ export function relativeTime(iso: string): string {
   return past ? `${value} ago` : `in ${value}`
 }
 
+export function stableExpiryLabel(
+  iso: string,
+  status?: "active" | "expired" | "revoked" | "paused"
+): string {
+  if (status === "expired") {
+    return "Expired"
+  }
+
+  const then = new Date(iso).getTime()
+  const now = new Date(DEMO_NOW_ISO).getTime()
+  const diffMs = then - now
+
+  if (diffMs <= 0) {
+    return "Expired"
+  }
+
+  const hours = Math.round(diffMs / 3600000)
+  if (hours < 24) {
+    return `${hours}h`
+  }
+
+  return `${Math.round(hours / 24)}d`
+}
+
 export function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
+    timeZone: "UTC",
   })
 }
 

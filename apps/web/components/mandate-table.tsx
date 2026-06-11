@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge"
 import { StatusBadge } from "@/components/status-badges"
 import { BudgetMeter } from "@/components/budget-meter"
 import { cn } from "@/lib/utils"
-import { relativeTime } from "@/lib/format"
+import { stableExpiryLabel } from "@/lib/format"
 import type { Mandate } from "@/lib/mandate-data"
 import { ChevronRight } from "lucide-react"
 
@@ -86,7 +86,7 @@ export function MandateTable({
                       : "text-foreground"
                   )}
                 >
-                  {relativeTime(m.expiresAt)}
+                  {stableExpiryLabel(m.expiresAt, m.status)}
                 </span>
               </TableCell>
               <TableCell className="pr-3 text-right">

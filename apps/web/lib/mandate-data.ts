@@ -5,6 +5,7 @@ import {
   VERIFIED_DEEPBOOK_DIGEST,
   formatConfigId,
 } from "@/lib/chain-config"
+import { DEMO_NOW_ISO } from "@/lib/format"
 
 export type MandateStatus = "active" | "expired" | "revoked" | "paused"
 
@@ -86,7 +87,7 @@ export const AGENTS: Agent[] = [
 export const ALL_PROTOCOLS: Protocol[] = ["DeepBook"]
 
 function iso(daysFromNow: number, hoursOffset = 0): string {
-  const d = new Date()
+  const d = new Date(DEMO_NOW_ISO)
   d.setDate(d.getDate() + daysFromNow)
   d.setHours(d.getHours() + hoursOffset)
   return d.toISOString()
