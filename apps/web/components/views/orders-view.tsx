@@ -110,8 +110,8 @@ export function OrdersView() {
               No DeepBook executions yet.
             </p>
             <p className="max-w-md text-sm text-muted-foreground">
-              Run an agent using an active mandate to generate on-chain
-              execution history.
+              Run an agent with an active mandate to generate real execution
+              history.
             </p>
           </div>
         )}

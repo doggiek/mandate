@@ -83,13 +83,19 @@ export function MandatesView({
               <ShieldOff />
             </EmptyMedia>
             <EmptyTitle>
-              {isWalletScoped ? "No mandates found for this wallet." : `No ${filter} mandates`}
+              {isWalletScoped ? "No mandates yet." : `No ${filter} mandates`}
             </EmptyTitle>
             <EmptyDescription>
               {isWalletScoped
-                ? "Create a Mandate to delegate scoped authority to an agent."
+                ? "Create a mandate to grant an agent capped DeepBook authority."
                 : "There are no mandates matching this filter."}
             </EmptyDescription>
+            {isWalletScoped && (
+              <Button size="sm" onClick={onCreate}>
+                <Plus data-icon="inline-start" />
+                Create Mandate
+              </Button>
+            )}
           </EmptyHeader>
         </Empty>
       )}

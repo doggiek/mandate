@@ -360,7 +360,7 @@ export function MandateDetailSheet({
                   <div>
                     <h3 className="text-sm font-medium">Budget policy</h3>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Spend is enforced before every mocked or DeepBook action.
+                      Spend is enforced before every authorized DeepBook action.
                     </p>
                   </div>
                   <WalletCards className="size-4 text-primary" />
@@ -547,7 +547,7 @@ export function MandateDetailSheet({
             <SheetHeader className="border-b border-border p-5">
               <SheetTitle>Mandate not found</SheetTitle>
               <SheetDescription>
-                This mocked mandate is no longer available in the console.
+                This mandate is no longer available in the console.
               </SheetDescription>
             </SheetHeader>
           </>

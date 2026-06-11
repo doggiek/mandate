@@ -6,8 +6,6 @@ import { NETWORK } from "@/lib/chain-config"
 import {
   AGENTS,
   ALL_PROTOCOLS,
-  SEED_ACTIVITY,
-  SEED_MANDATES,
   type ActivityEvent,
   type DeepBookOrder,
   type Mandate,
@@ -437,8 +435,6 @@ export function MandateStoreProvider({
   children: React.ReactNode
 }) {
   const account = useCurrentAccount()
-  const [seedMandates, setSeedMandates] = React.useState<Mandate[]>(SEED_MANDATES)
-  const [seedActivity] = React.useState<ActivityEvent[]>(SEED_ACTIVITY)
   const [rpcMandates, setRpcMandates] = React.useState<Mandate[]>([])
   const [rpcActivity, setRpcActivity] = React.useState<ActivityEvent[]>([])
   const [userMandates, setUserMandates] = React.useState<Mandate[]>([])
@@ -652,13 +648,10 @@ export function MandateStoreProvider({
         writeStorageArray(USER_MANDATES_KEY, next)
         return next
       })
-      setSeedMandates((prev) =>
-        prev.map((m) => (m.id === id ? { ...m, status: "revoked" } : m))
-      )
       setRpcMandates((prev) =>
         prev.map((m) => (m.id === id ? { ...m, status: "revoked" } : m))
       )
-      const target = [...rpcMandates, ...userMandates, ...seedMandates].find(
+      const target = [...rpcMandates, ...userMandates].find(
         (m) => m.id === id
       )
       const revokedActivity: ActivityEvent = {
@@ -681,7 +674,7 @@ export function MandateStoreProvider({
         return next
       })
     },
-    [rpcMandates, seedMandates, userMandates]
+    [rpcMandates, userMandates]
   )
 
   const recordAgentExecution = React.useCallback(
@@ -714,9 +707,8 @@ export function MandateStoreProvider({
         return next
       })
       setRpcMandates((prev) => prev.map(incrementSpent))
-      setSeedMandates((prev) => prev.map(incrementSpent))
 
-      const target = [...rpcMandates, ...userMandates, ...seedMandates].find(
+      const target = [...rpcMandates, ...userMandates].find(
         (mandate) => mandate.id === mandateId
       )
       const executionActivity: ActivityEvent = {
@@ -761,7 +753,7 @@ export function MandateStoreProvider({
         return next
       })
     },
-    [rpcMandates, seedMandates, userMandates]
+    [rpcMandates, userMandates]
   )
 
   const togglePause = React.useCallback((id: string) => {
@@ -777,16 +769,6 @@ export function MandateStoreProvider({
       writeStorageArray(USER_MANDATES_KEY, next)
       return next
     })
-    setSeedMandates((prev) =>
-      prev.map((m) =>
-        m.id === id
-          ? {
-              ...m,
-              status: toggledStatus(m.status),
-            }
-          : m
-      )
-    )
   }, [])
 
   const clearUserDemoData = React.useCallback(() => {
@@ -827,16 +809,16 @@ export function MandateStoreProvider({
   const mandates = React.useMemo(() => {
     const primary = account?.address
       ? [...rpcMandates, ...walletUserMandates]
-      : [...walletUserMandates, ...seedMandates]
+      : []
     return uniqById(primary).map((mandate) =>
       mergeMandateMetadata(mandate, userMetadata[mandate.id])
     )
-  }, [account?.address, rpcMandates, seedMandates, userMandates, userMetadata, walletUserMandates])
+  }, [account?.address, rpcMandates, userMetadata, walletUserMandates])
 
   const activity = React.useMemo(() => {
     const primary = account?.address
       ? [...rpcActivity, ...walletUserActivity]
-      : [...walletUserActivity, ...seedActivity]
+      : []
     const mandateById = new Map(mandates.map((mandate) => [mandate.id, mandate]))
     return uniqActivity(primary).map((event) => {
       if (!account?.address) {
@@ -851,11 +833,15 @@ export function MandateStoreProvider({
           (mandate?.agentAddress ? "Agent Wallet" : event.agentName),
       }
     })
-  }, [account?.address, mandates, rpcActivity, seedActivity, walletUserActivity])
+  }, [account?.address, mandates, rpcActivity, walletUserActivity])
 
   const orders = React.useMemo(() => {
+    if (!account?.address) {
+      return []
+    }
+
     const mandateById = new Map(mandates.map((mandate) => [mandate.id, mandate]))
-    const activityExecutions = (account?.address ? activity : [])
+    const activityExecutions = activity
       .map((event) => activityToExecution(event, mandateById.get(event.mandateId)))
       .filter((execution): execution is DeepBookOrder => Boolean(execution))
     const localExecutions = executionHistory.map((execution) => ({

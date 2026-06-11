@@ -16,7 +16,7 @@ export function CtaSection() {
         </h2>
         <p className="mx-auto mt-5 max-w-xl text-pretty text-lg leading-relaxed text-muted-foreground">
           Join the teams building the autonomous economy on Sui with guardrails
-          that hold. Open the Mandate console to run the Agent Wallet demo.
+          that hold. Open the Mandate console to run the Agent Wallet flow.
         </p>
 
         <form className="mx-auto mt-8 flex max-w-md flex-col gap-3 sm:flex-row">

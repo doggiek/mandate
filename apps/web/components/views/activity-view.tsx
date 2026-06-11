@@ -85,11 +85,18 @@ export function ActivityView() {
         ) : filtered.length > 0 ? (
           <ActivityFeed events={filtered} />
         ) : (
-          <p className="py-12 text-center text-sm text-muted-foreground">
-            {isWalletScoped
-              ? "No Mandate activity found for this wallet."
-              : "No events match this filter."}
-          </p>
+          <Empty className="py-12">
+            <EmptyHeader>
+              <EmptyTitle>
+                {isWalletScoped ? "No on-chain activity yet." : "No events match this filter."}
+              </EmptyTitle>
+              <EmptyDescription>
+                {isWalletScoped
+                  ? "Create or run a mandate to generate ActivityEvents."
+                  : "Try a different event filter."}
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         )}
       </CardContent>
     </Card>

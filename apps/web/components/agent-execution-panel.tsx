@@ -25,7 +25,6 @@ import {
 import {
   AGENT_WALLET_ADDRESS,
   DEEPBOOK_POOL_KEY,
-  VERIFIED_DEEPBOOK_DIGEST,
 } from "@/lib/chain-config"
 import { formatSui, stableExpiryLabel } from "@/lib/format"
 import { useMandateStore } from "@/lib/mandate-store"
@@ -143,10 +142,8 @@ export function AgentExecutionPanel() {
     () => [
       {
         label: "Agent Wallet",
-        value: selectedMandate
-          ? selectedMandate.agentAddress ?? "Not indexed"
-          : AGENT_WALLET_ADDRESS,
-        copyable: Boolean(selectedMandate?.agentAddress) || !selectedMandate,
+        value: selectedMandate?.agentAddress,
+        copyable: Boolean(selectedMandate?.agentAddress),
       },
       {
         label: "Selected mandate id",
@@ -175,11 +172,11 @@ export function AgentExecutionPanel() {
       },
       {
         label: "Last verified digest",
-        value: VERIFIED_DEEPBOOK_DIGEST,
-        copyable: true,
+        value: result?.status === "SUCCESS" ? result.digest : undefined,
+        copyable: result?.status === "SUCCESS" && Boolean(result.digest),
       },
     ],
-    [selectedMandate]
+    [result?.digest, result?.status, selectedMandate]
   )
   const selectedAgentAddress = selectedMandate?.agentAddress
   const agentWalletMatches =
@@ -243,7 +240,7 @@ export function AgentExecutionPanel() {
       <CardHeader className="border-b border-border">
         <CardTitle>Agent Execution</CardTitle>
         <CardDescription>
-          Execute a real DeepBook PTB using the selected active Mandate.
+          Run a predefined DeepBook strategy through the selected Mandate policy.
         </CardDescription>
         <CardAction>
           <Button
@@ -318,26 +315,28 @@ export function AgentExecutionPanel() {
           </div>
         )}
 
-        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-7">
-          {executionSummary.map((item) => (
-            <ResultField
-              key={item.label}
-              label={item.label}
-              value={
-                item.copyable && item.value ? (
-                  <CopyableId value={item.value} label={item.label.toLowerCase()} />
-                ) : (
-                  item.value ?? "-"
-                )
-              }
-              mono={
-                item.label === "Agent Wallet" ||
-                item.label === "Selected mandate id" ||
-                item.label === "Last verified digest"
-              }
-            />
-          ))}
-        </div>
+        {selectedMandate && (
+          <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-7">
+            {executionSummary.map((item) => (
+              <ResultField
+                key={item.label}
+                label={item.label}
+                value={
+                  item.copyable && item.value ? (
+                    <CopyableId value={item.value} label={item.label.toLowerCase()} />
+                  ) : (
+                    item.value ?? "-"
+                  )
+                }
+                mono={
+                  item.label === "Agent Wallet" ||
+                  item.label === "Selected mandate id" ||
+                  item.label === "Last verified digest"
+                }
+              />
+            ))}
+          </div>
+        )}
 
         {!selectedMandate && (
           <Alert className="border-amber-500/25 bg-amber-500/10">

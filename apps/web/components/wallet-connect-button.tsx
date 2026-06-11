@@ -93,6 +93,10 @@ export function WalletConnectButton({
             <p className="mt-1 text-xs uppercase tracking-wider text-muted-foreground">
               Network / {NETWORK_LABEL}
             </p>
+            <p className="mt-2 text-xs leading-snug text-muted-foreground">
+              Switched wallet accounts? Disconnect and reconnect to refresh the
+              active account.
+            </p>
           </div>
           <DropdownMenuSeparator />
           <DropdownMenuItem

@@ -36,7 +36,7 @@ export function OverviewView({
   onCreate: () => void
   onViewAll: () => void
 }) {
-  const { mandates, activity, loading, error, isWalletScoped } = useMandateStore()
+  const { mandates, activity, orders, loading, error, isWalletScoped } = useMandateStore()
   const activeMandates = React.useMemo(
     () => mandates.filter((m) => m.status === "active"),
     [mandates]
@@ -44,7 +44,9 @@ export function OverviewView({
 
   const stats = React.useMemo(() => {
     const activeAgentKeys = new Set(
-      activeMandates.map((mandate) => mandate.agentAddress ?? mandate.agent.id)
+      activeMandates
+        .map((mandate) => mandate.agentAddress)
+        .filter((address): address is string => Boolean(address))
     )
     const authorizedBudget = activeMandates.reduce(
       (sum, mandate) => sum + mandate.budget,
@@ -55,10 +57,10 @@ export function OverviewView({
       activeAgents: activeAgentKeys.size,
       activeMandates: activeMandates.length,
       authorizedBudget,
-      deepBookExecutions: 2,
-      blockedActions: 1,
+      deepBookExecutions: orders.length,
+      blockedActions: activity.filter((event) => event.kind === "tx.blocked").length,
     }
-  }, [activeMandates])
+  }, [activeMandates, activity, orders.length])
 
   return (
     <div className="flex flex-col gap-6">
@@ -101,6 +103,25 @@ export function OverviewView({
           </CardContent>
         </Card>
       )}
+      {isWalletScoped && activeMandates.length === 0 && (
+        <Card className="border-primary/15 bg-card/80">
+          <CardContent className="grid gap-3 p-4 sm:grid-cols-4">
+            {[
+              "Step 1. Create a Mandate",
+              "Step 2. Run the Agent",
+              "Step 3. Inspect ActivityEvent and DeepBook execution",
+              "Step 4. Revoke authority",
+            ].map((step) => (
+              <div
+                key={step}
+                className="rounded-lg border border-border bg-background/60 p-3 text-sm font-medium text-foreground"
+              >
+                {step}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
       <AgentExecutionPanel />
 
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -129,7 +150,7 @@ export function OverviewView({
               <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
                 <p className="text-sm text-muted-foreground">
                   {isWalletScoped
-                    ? "No mandates found for this wallet. Create a Mandate to delegate scoped authority to an agent."
+                    ? "No mandates yet. Create a mandate to grant an agent capped DeepBook authority."
                     : "No active mandates yet."}
                 </p>
                 <Button size="sm" onClick={onCreate}>
