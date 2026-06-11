@@ -38,6 +38,7 @@ import {
   ALL_PROTOCOLS,
   useMandateStore,
 } from "@/lib/mandate-store"
+import { NETWORK } from "@/lib/chain-config"
 import { formatUsd } from "@/lib/format"
 import { Check } from "lucide-react"
 
@@ -64,7 +65,9 @@ export function CreateMandateDialog({
   const [approval, setApproval] = React.useState(50000)
   const [protocols, setProtocols] = React.useState<string[]>(["DeepBook"])
   const [duration, setDuration] = React.useState(30)
-  const [network, setNetwork] = React.useState<"mainnet" | "testnet">("mainnet")
+  const [network, setNetwork] = React.useState<"mainnet" | "testnet">(
+    NETWORK as "mainnet" | "testnet"
+  )
 
   function reset() {
     setLabel("")

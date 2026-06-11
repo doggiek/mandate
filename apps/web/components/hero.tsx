@@ -33,7 +33,7 @@ export function Hero() {
               nativeButton={false}
               render={<a href="/console" />}
             >
-              Request access
+              Launch Console
               <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
             </Button>
             <Button
@@ -43,7 +43,7 @@ export function Hero() {
               nativeButton={false}
               render={<a href="/console" />}
             >
-              Read the docs
+              Read Docs
             </Button>
           </div>
 

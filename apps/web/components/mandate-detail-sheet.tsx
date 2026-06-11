@@ -23,7 +23,13 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Separator } from "@/components/ui/separator"
-import { formatDate, formatUsd, relativeTime, shortId } from "@/lib/format"
+import {
+  CURRENT_MANDATE_ID,
+  DEEPBOOK_POOL_KEY,
+  NETWORK,
+  formatConfigId,
+} from "@/lib/chain-config"
+import { formatDate, formatUsd, relativeTime } from "@/lib/format"
 import { useMandateStore } from "@/lib/mandate-store"
 import { cn } from "@/lib/utils"
 
@@ -131,14 +137,14 @@ export function MandateDetailSheet({
                     {mandate.label}
                   </SheetTitle>
                   <SheetDescription className="font-mono">
-                    {shortId(mandate.id)} · {mandate.network}
+                    {formatConfigId(CURRENT_MANDATE_ID)} · {NETWORK}
                   </SheetDescription>
                 </div>
                 <Badge
                   variant="outline"
                   className="border-primary/30 bg-primary/10 text-primary"
                 >
-                  DeepBook
+                  {DEEPBOOK_POOL_KEY}
                 </Badge>
               </div>
             </SheetHeader>
@@ -224,7 +230,7 @@ export function MandateDetailSheet({
                     </span>
                   }
                 />
-                <DetailMetric label="Protocol scope" value="DeepBook" />
+                <DetailMetric label="Protocol scope" value="DeepBook only" />
                 <DetailMetric label="Expiration" value={formatDate(mandate.expiresAt)} />
               </section>
 

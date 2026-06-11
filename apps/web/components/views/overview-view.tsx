@@ -11,9 +11,11 @@ import {
 } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { AgentExecutionPanel } from "@/components/agent-execution-panel"
+import { WalletSummary } from "@/components/wallet-summary"
 import { StatCard } from "@/components/stat-card"
 import { MandateTable } from "@/components/mandate-table"
 import { ActivityFeed } from "@/components/activity-feed"
+import { DEEPBOOK_POOL_KEY } from "@/lib/chain-config"
 import { useMandateStore } from "@/lib/mandate-store"
 import {
   ArrowRight,
@@ -64,7 +66,7 @@ export function OverviewView({
         <StatCard
           label="DeepBook Executions"
           value={String(stats.deepBookExecutions)}
-          sublabel="DEEP_SUI PTBs"
+          sublabel={`${DEEPBOOK_POOL_KEY} PTBs`}
           icon={CheckCircle2}
           accent="positive"
         />
@@ -77,6 +79,7 @@ export function OverviewView({
         />
       </section>
 
+      <WalletSummary />
       <AgentExecutionPanel />
 
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">

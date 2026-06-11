@@ -14,7 +14,7 @@ export function CtaSection() {
         </h2>
         <p className="mx-auto mt-5 max-w-xl text-pretty text-lg leading-relaxed text-muted-foreground">
           Join the teams building the autonomous economy on Sui with guardrails
-          that hold. Request early access to the Mandate SDK.
+          that hold. Open the Mandate console to run the Agent Wallet demo.
         </p>
 
         <form className="mx-auto mt-8 flex max-w-md flex-col gap-3 sm:flex-row">
@@ -31,7 +31,7 @@ export function CtaSection() {
             nativeButton={false}
             render={<a href="/console" />}
           >
-            Request access
+            Launch Console
             <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
           </Button>
         </form>

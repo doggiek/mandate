@@ -65,7 +65,7 @@ export function SiteHeader() {
             nativeButton={false}
             render={<a href="/console" />}
           >
-            Request access
+            Launch Console
           </Button>
         </div>
       </nav>

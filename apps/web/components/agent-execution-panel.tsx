@@ -14,6 +14,12 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  CURRENT_MANDATE_ID,
+  DEEPBOOK_POOL_KEY,
+  VERIFIED_DEEPBOOK_DIGEST,
+  formatConfigId,
+} from "@/lib/chain-config"
 import { cn } from "@/lib/utils"
 
 type AgentRunResult = {
@@ -27,10 +33,10 @@ type AgentRunResult = {
 
 const EXECUTION_SUMMARY = [
   ["Agent Wallet", "0x91dc...ad8b2"],
-  ["Mandate ID", "0xd9f4...227c"],
-  ["Strategy", "Swap 0.001 SUI through DeepBook DEEP_SUI"],
+  ["Mandate ID", formatConfigId(CURRENT_MANDATE_ID)],
+  ["Strategy", `Swap 0.001 SUI through DeepBook ${DEEPBOOK_POOL_KEY}`],
   ["Policy", "DeepBook only / Max tx 0.01 SUI / 24h expiry"],
-  ["Last verified digest", "DkV1Sd...6PSfX"],
+  ["Last verified digest", formatConfigId(VERIFIED_DEEPBOOK_DIGEST, 6, 5)],
 ] as const
 
 function ResultField({

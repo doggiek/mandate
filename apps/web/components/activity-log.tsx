@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, X, ArrowUpRight } from 'lucide-react'
 import { SectionLabel } from '@/components/section-label'
+import { DEEPBOOK_POOL_KEY } from '@/lib/chain-config'
 import { cn } from '@/lib/utils'
 
 type Entry = {
@@ -28,7 +29,7 @@ const seed: Omit<Entry, 'id'>[] = [
   {
     time: '14:02:44',
     agent: 'mm-deepbook',
-    action: 'swap DEEP_SUI',
+    action: `swap ${DEEPBOOK_POOL_KEY}`,
     amount: '0.001 SUI',
     protocol: 'DeepBook',
     status: 'allowed',
@@ -36,7 +37,7 @@ const seed: Omit<Entry, 'id'>[] = [
   {
     time: '14:03:09',
     agent: 'mm-deepbook',
-    action: 'swap DEEP_SUI',
+    action: `swap ${DEEPBOOK_POOL_KEY}`,
     amount: '0.200 SUI',
     protocol: 'DeepBook',
     status: 'blocked',
@@ -53,7 +54,7 @@ const seed: Omit<Entry, 'id'>[] = [
   {
     time: '14:04:20',
     agent: 'mm-deepbook',
-    action: 'swap DEEP_SUI',
+    action: `swap ${DEEPBOOK_POOL_KEY}`,
     amount: '0.050 SUI',
     protocol: 'DeepBook',
     status: 'blocked',

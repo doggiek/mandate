@@ -1,6 +1,11 @@
 import { execFile } from "node:child_process"
 import path from "node:path"
 import { promisify } from "node:util"
+import {
+  CURRENT_MANDATE_ID,
+  DEEPBOOK_POOL_KEY,
+  PACKAGE_ID,
+} from "@/lib/chain-config"
 
 const execFileAsync = promisify(execFile)
 
@@ -53,6 +58,12 @@ export async function POST() {
       ["run", "agent:swap", "--silent"],
       {
         cwd: repoRoot,
+        env: {
+          ...process.env,
+          PACKAGE_ID,
+          MANDATE_ID: CURRENT_MANDATE_ID,
+          POOL_KEY: DEEPBOOK_POOL_KEY,
+        },
         timeout: 120_000,
         maxBuffer: 1024 * 1024,
       }

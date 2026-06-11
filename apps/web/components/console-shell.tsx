@@ -8,11 +8,8 @@ import {
 } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
 import { Button } from "@/components/ui/button"
-import {
-  Avatar,
-  AvatarFallback,
-} from "@/components/ui/avatar"
 import { AppSidebar } from "@/components/app-sidebar"
+import { WalletConnectButton } from "@/components/wallet-connect-button"
 import { OverviewView } from "@/components/views/overview-view"
 import { MandatesView } from "@/components/views/mandates-view"
 import { ActivityView } from "@/components/views/activity-view"
@@ -77,11 +74,7 @@ export function ConsoleShell() {
                 <span className="sm:hidden">Create</span>
               </Button>
               <Separator orientation="vertical" className="h-6" />
-              <Avatar className="size-8">
-                <AvatarFallback className="bg-secondary text-xs font-medium">
-                  0x
-                </AvatarFallback>
-              </Avatar>
+              <WalletConnectButton showNetwork />
             </div>
           </header>
 

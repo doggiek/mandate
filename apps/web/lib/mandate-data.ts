@@ -1,3 +1,11 @@
+import {
+  CURRENT_MANDATE_ID,
+  DEEPBOOK_POOL_KEY,
+  NETWORK,
+  VERIFIED_DEEPBOOK_DIGEST,
+  formatConfigId,
+} from "@/lib/chain-config"
+
 export type MandateStatus = "active" | "expired" | "revoked" | "paused"
 
 export type Protocol = "DeepBook" | "Cetus" | "Scallop" | "Aftermath" | "Navi" | "SuiLend"
@@ -84,10 +92,14 @@ function iso(daysFromNow: number, hoursOffset = 0): string {
   return d.toISOString()
 }
 
+const MOCK_NETWORK = NETWORK as Mandate["network"]
+const VERIFIED_DIGEST_SHORT = formatConfigId(VERIFIED_DEEPBOOK_DIGEST, 6, 5)
+const MANDATE_ID_SHORT = formatConfigId(CURRENT_MANDATE_ID)
+
 export const SEED_MANDATES: Mandate[] = [
   {
     id: "mnd_8Fk2Lp",
-    label: "DEEP_SUI swap mandate",
+    label: `${DEEPBOOK_POOL_KEY} swap mandate`,
     agent: AGENTS[1],
     status: "active",
     budget: 1,
@@ -97,7 +109,7 @@ export const SEED_MANDATES: Mandate[] = [
     expiresAt: iso(1),
     txLimit: 0.01,
     approvalThreshold: 0.01,
-    network: "testnet",
+    network: MOCK_NETWORK,
   },
   {
     id: "mnd_3Qr9Xa",
@@ -111,7 +123,7 @@ export const SEED_MANDATES: Mandate[] = [
     expiresAt: iso(60),
     txLimit: 0.01,
     approvalThreshold: 0.01,
-    network: "testnet",
+    network: MOCK_NETWORK,
   },
   {
     id: "mnd_7Vd1Mn",
@@ -125,7 +137,7 @@ export const SEED_MANDATES: Mandate[] = [
     expiresAt: iso(2),
     txLimit: 0.01,
     approvalThreshold: 0.01,
-    network: "testnet",
+    network: MOCK_NETWORK,
   },
   {
     id: "mnd_2Hs5Wz",
@@ -139,7 +151,7 @@ export const SEED_MANDATES: Mandate[] = [
     expiresAt: iso(40),
     txLimit: 0.01,
     approvalThreshold: 0.01,
-    network: "testnet",
+    network: MOCK_NETWORK,
   },
   {
     id: "mnd_9Bt4Kc",
@@ -153,7 +165,7 @@ export const SEED_MANDATES: Mandate[] = [
     expiresAt: iso(-3),
     txLimit: 0.01,
     approvalThreshold: 0.01,
-    network: "testnet",
+    network: MOCK_NETWORK,
   },
   {
     id: "mnd_5Np8Rd",
@@ -167,7 +179,7 @@ export const SEED_MANDATES: Mandate[] = [
     expiresAt: iso(30),
     txLimit: 0.01,
     approvalThreshold: 0.01,
-    network: "testnet",
+    network: MOCK_NETWORK,
   },
 ]
 
@@ -179,9 +191,9 @@ export const SEED_ACTIVITY: ActivityEvent[] = [
     agentName: "Market Maker",
     protocol: "DeepBook",
     amount: 0.001,
-    message: "Mandate created for DeepBook-only DEEP_SUI execution",
+    message: `Mandate created for DeepBook-only ${DEEPBOOK_POOL_KEY} execution`,
     timestamp: iso(0, -1),
-    digest: "0xd9f4…227c",
+    digest: MANDATE_ID_SHORT,
   },
   {
     id: "evt_02",
@@ -192,7 +204,7 @@ export const SEED_ACTIVITY: ActivityEvent[] = [
     amount: 0.001,
     message: "Agent authorized spend through Mandate policy object",
     timestamp: iso(0, -2),
-    digest: "DkV1Sd…6PSfX",
+    digest: VERIFIED_DIGEST_SHORT,
   },
   {
     id: "evt_03",
@@ -201,9 +213,9 @@ export const SEED_ACTIVITY: ActivityEvent[] = [
     agentName: "Market Maker",
     protocol: "DeepBook",
     amount: 0.001,
-    message: "DeepBook swap executed on DEEP_SUI via PTB",
+    message: `DeepBook swap executed on ${DEEPBOOK_POOL_KEY} via PTB`,
     timestamp: iso(0, -3),
-    digest: "3EmxM5…Ydbf8",
+    digest: VERIFIED_DIGEST_SHORT,
   },
   {
     id: "evt_04",
@@ -233,7 +245,7 @@ export const SEED_ACTIVITY: ActivityEvent[] = [
     amount: 0.001,
     message: "On-chain ActivityEvent emitted for DeepBook authorization",
     timestamp: iso(-1, -6),
-    digest: "DkV1Sd…6PSfX",
+    digest: VERIFIED_DIGEST_SHORT,
   },
   {
     id: "evt_07",
@@ -251,7 +263,7 @@ export const SEED_ACTIVITY: ActivityEvent[] = [
     agentName: "DCA Executor",
     protocol: "DeepBook",
     amount: 0.001,
-    message: "DeepBook only policy checked for DEEP_SUI route",
+    message: `DeepBook only policy checked for ${DEEPBOOK_POOL_KEY} route`,
     timestamp: iso(-2, -4),
     digest: "0x7d12…aa55",
   },
@@ -262,7 +274,7 @@ export const SEED_ORDERS: DeepBookOrder[] = [
     id: "ord_1001",
     mandateId: "mnd_8Fk2Lp",
     agentName: "Market Maker",
-    pair: "DEEP_SUI",
+    pair: DEEPBOOK_POOL_KEY,
     side: "buy",
     price: 0.001,
     size: 0.001,
@@ -274,7 +286,7 @@ export const SEED_ORDERS: DeepBookOrder[] = [
     id: "ord_1002",
     mandateId: "mnd_8Fk2Lp",
     agentName: "Market Maker",
-    pair: "DEEP_SUI",
+    pair: DEEPBOOK_POOL_KEY,
     side: "sell",
     price: 0.001,
     size: 0.001,
@@ -286,7 +298,7 @@ export const SEED_ORDERS: DeepBookOrder[] = [
     id: "ord_1003",
     mandateId: "mnd_8Fk2Lp",
     agentName: "Market Maker",
-    pair: "DEEP_SUI",
+    pair: DEEPBOOK_POOL_KEY,
     side: "buy",
     price: 0.001,
     size: 0.001,
@@ -298,7 +310,7 @@ export const SEED_ORDERS: DeepBookOrder[] = [
     id: "ord_1004",
     mandateId: "mnd_9Bt4Kc",
     agentName: "Arbitrage Scout",
-    pair: "DEEP_SUI",
+    pair: DEEPBOOK_POOL_KEY,
     side: "sell",
     price: 0.001,
     size: 0.001,
@@ -310,7 +322,7 @@ export const SEED_ORDERS: DeepBookOrder[] = [
     id: "ord_1005",
     mandateId: "mnd_8Fk2Lp",
     agentName: "Market Maker",
-    pair: "DEEP_SUI",
+    pair: DEEPBOOK_POOL_KEY,
     side: "buy",
     price: 0.001,
     size: 0.001,
@@ -322,7 +334,7 @@ export const SEED_ORDERS: DeepBookOrder[] = [
     id: "ord_1006",
     mandateId: "mnd_9Bt4Kc",
     agentName: "Arbitrage Scout",
-    pair: "DEEP_SUI",
+    pair: DEEPBOOK_POOL_KEY,
     side: "buy",
     price: 0.001,
     size: 0.001,
