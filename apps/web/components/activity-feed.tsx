@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils"
 import { CopyableId } from "@/components/copyable-id"
+import { ExplorerLink } from "@/components/explorer-link"
 import { ActivityBadge } from "@/components/status-badges"
 import { formatSui, relativeTime } from "@/lib/format"
 import type { ActivityEvent } from "@/lib/mandate-data"
@@ -48,7 +49,10 @@ export function ActivityFeed({
               {e.digest && (
                 <>
                   <span className="text-border">·</span>
-                  <CopyableId value={e.digest} label="digest" />
+                  <span className="inline-flex min-w-0 items-center gap-1">
+                    <CopyableId value={e.digest} label="digest" />
+                    <ExplorerLink digest={e.digest} />
+                  </span>
                 </>
               )}
               <span className="text-border">·</span>

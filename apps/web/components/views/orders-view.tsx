@@ -1,5 +1,6 @@
 "use client"
 
+import { Fragment } from "react"
 import {
   Card,
   CardContent,
@@ -17,8 +18,13 @@ import {
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { CopyableId } from "@/components/copyable-id"
+import { ExplorerLink } from "@/components/explorer-link"
+import { DEEPBOOK_POOL_ID } from "@/lib/chain-config"
 import { formatSui } from "@/lib/format"
 import { useMandateStore } from "@/lib/mandate-store"
+
+const DEEPBOOK_PAIR = "DEEP/SUI"
+const DEEPBOOK_SIDE = "Buy"
 
 function executionTime(timestamp: number) {
   const diffMs = Date.now() - timestamp
@@ -45,6 +51,7 @@ function executionStatusLabel(status: string) {
 
 export function OrdersView() {
   const { orders } = useMandateStore()
+  const sortedOrders = [...orders].sort((a, b) => b.timestamp - a.timestamp)
 
   return (
     <Card>
@@ -55,41 +62,56 @@ export function OrdersView() {
         </CardDescription>
       </CardHeader>
       <CardContent className="p-0">
-        {orders.length > 0 ? (
+        {sortedOrders.length > 0 ? (
           <Table>
             <TableHeader>
               <TableRow className="border-border hover:bg-transparent">
-                <TableHead className="pl-4">Mandate</TableHead>
-                <TableHead>Digest</TableHead>
-                <TableHead>Protocol</TableHead>
-                <TableHead>Input Amount</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Gas / Balance Delta</TableHead>
-                <TableHead className="hidden pr-4 text-right md:table-cell">
+                <TableHead className="w-[26%] pl-5">Mandate</TableHead>
+                <TableHead className="w-[18%]">Digest</TableHead>
+                <TableHead className="w-[18%]">Pair / Side</TableHead>
+                <TableHead className="w-[14%]">Input Amount</TableHead>
+                <TableHead className="w-[12%]">Status</TableHead>
+                <TableHead className="w-[12%] pr-5 text-right">
                   Time
                 </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {orders.map((execution) => (
-                <TableRow key={execution.id} className="border-border">
-                  <TableCell className="pl-4">
-                    <div className="flex flex-col gap-0.5">
+              {sortedOrders.map((execution) => (
+                <Fragment key={execution.id}>
+                <TableRow className="border-border align-top">
+                  <TableCell className="py-4 pl-5">
+                    <div className="flex min-w-0 flex-col gap-0.5">
                       <span className="font-medium">
                         {execution.mandateLabel}
                       </span>
-                      <CopyableId
-                        value={execution.mandateId}
-                        label="mandate id"
-                        className="text-xs text-muted-foreground"
-                      />
+                      <span className="inline-flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                        <CopyableId
+                          value={execution.mandateId}
+                          label="mandate id"
+                        />
+                        <ExplorerLink
+                          objectId={execution.mandateId}
+                          label="View mandate on Suivision"
+                        />
+                      </span>
                     </div>
                   </TableCell>
-                  <TableCell>
-                    <CopyableId value={execution.digest} label="digest" />
+                  <TableCell className="py-4">
+                    <span className="inline-flex min-w-0 items-center gap-1">
+                      <CopyableId value={execution.digest} label="digest" />
+                      <ExplorerLink digest={execution.digest} />
+                    </span>
                   </TableCell>
-                  <TableCell>{execution.protocol}</TableCell>
-                  <TableCell>
+                  <TableCell className="py-4">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-medium">{DEEPBOOK_PAIR}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {execution.side ?? DEEPBOOK_SIDE} DEEP with SUI
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="py-4">
                     <div className="flex flex-col gap-0.5">
                       <span className="font-mono text-sm">
                         {typeof execution.amountSui === "number"
@@ -97,11 +119,11 @@ export function OrdersView() {
                           : "0.001 SUI"}
                       </span>
                       <span className="text-xs text-muted-foreground">
-                        {execution.pair ?? "DEEP_SUI"} · {execution.side ?? "Buy"}
+                        Input
                       </span>
                     </div>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="py-4">
                     <Badge
                       variant="outline"
                       className={
@@ -112,27 +134,71 @@ export function OrdersView() {
                     >
                       {executionStatusLabel(execution.status)}
                     </Badge>
+                    {execution.status !== "failed" && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Filled
+                      </p>
+                    )}
                   </TableCell>
-                  <TableCell className="text-right font-mono text-sm tabular-nums">
-                    {typeof execution.suiBalanceChange === "number"
-                      ? formatSui(execution.suiBalanceChange)
-                      : "-"}
-                  </TableCell>
-                  <TableCell className="hidden pr-4 text-right text-sm text-muted-foreground tabular-nums md:table-cell">
-                    {executionTime(execution.timestamp)}
-                  </TableCell>
-                </TableRow>
+                    <TableCell className="py-4 pr-5 text-right text-sm text-muted-foreground tabular-nums">
+                      {executionTime(execution.timestamp)}
+                    </TableCell>
+                  </TableRow>
+                  <TableRow
+                    className="border-border hover:bg-transparent"
+                  >
+                    <TableCell
+                      colSpan={6}
+                      className="px-5 pb-4 pt-0 text-xs text-muted-foreground"
+                    >
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                        <span>
+                          Protocol:{" "}
+                          <span className="text-foreground">
+                            {execution.protocol}
+                          </span>
+                        </span>
+                        <span className="inline-flex min-w-0 items-center gap-1">
+                          Pool:
+                          <CopyableId
+                            value={DEEPBOOK_POOL_ID}
+                            label="DeepBook pool object id"
+                          />
+                          <ExplorerLink
+                            objectId={DEEPBOOK_POOL_ID}
+                            label="View DeepBook pool on Suivision"
+                          />
+                        </span>
+                        <span>
+                          Gas Fee:{" "}
+                          <span className="font-mono text-foreground">
+                            {typeof execution.gasFeeSui === "number"
+                              ? formatSui(execution.gasFeeSui)
+                              : "-"}
+                          </span>
+                        </span>
+                        <span>
+                          Wallet Delta:{" "}
+                          <span className="font-mono text-foreground">
+                            {typeof execution.suiBalanceChange === "number"
+                              ? formatSui(execution.suiBalanceChange)
+                              : "-"}
+                          </span>
+                        </span>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                </Fragment>
               ))}
             </TableBody>
           </Table>
         ) : (
           <div className="flex flex-col items-center gap-2 px-6 py-16 text-center">
             <p className="text-sm font-medium text-foreground">
-              No DeepBook executions yet.
+              No DeepBook executions yet
             </p>
             <p className="max-w-md text-sm text-muted-foreground">
-              Run an agent with an active mandate to generate real execution
-              history.
+              Run an active mandate to generate a real DeepBook transaction.
             </p>
           </div>
         )}

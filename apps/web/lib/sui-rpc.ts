@@ -15,6 +15,7 @@ export const MANDATE_EVENT_TYPES = {
   activity: `${PACKAGE_ID}::mandate::ActivityEvent`,
   revoke: `${PACKAGE_ID}::mandate::RevokeEvent`,
   reject: `${PACKAGE_ID}::mandate::RejectEvent`,
+  blocked: `${PACKAGE_ID}::mandate::BlockedEvent`,
 } as const
 
 let rpcClient: SuiJsonRpcClient | null = null
@@ -95,6 +96,19 @@ export async function queryMandateRevokeEvents(mandateId?: string) {
 
 export async function queryMandateRejectEvents(mandateId?: string) {
   const events = await queryEventsByType(MANDATE_EVENT_TYPES.reject)
+
+  if (!mandateId) {
+    return events
+  }
+
+  return events.filter((event) => {
+    const parsed = parsedJsonRecord(event)
+    return parsed.mandate_id === mandateId || parsed.mandateId === mandateId
+  })
+}
+
+export async function queryMandateBlockedEvents(mandateId?: string) {
+  const events = await queryEventsByType(MANDATE_EVENT_TYPES.blocked)
 
   if (!mandateId) {
     return events

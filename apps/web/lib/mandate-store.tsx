@@ -16,6 +16,7 @@ import { formatSui, stableExpiryLabel } from "@/lib/format"
 import {
   getMandateObject,
   queryMandateActivityEvents,
+  queryMandateBlockedEvents,
   queryMandateCreatedEvents,
   queryMandateRejectEvents,
   queryMandateRevokeEvents,
@@ -58,11 +59,13 @@ type StoreContextValue = {
     digest?: string
     amountSui?: number
     suiBalanceChange?: number
+    gasFeeSui?: number
     pair?: string
     side?: "Buy" | "Sell"
   }) => void
   recordBlockedAction: (input: {
     mandateId: string
+    digest?: string
     amountSui?: number
     reason: string
   }) => void
@@ -140,6 +143,18 @@ function eventMandateId(event: SuiEvent) {
   const parsed = parsedJsonRecord(event)
   const id = parsed.mandate_id ?? parsed.mandateId
   return typeof id === "string" ? id : null
+}
+
+function eventReason(value: unknown) {
+  if (typeof value === "string") {
+    return value
+  }
+
+  if (Array.isArray(value) && value.every((item) => typeof item === "number")) {
+    return new TextDecoder().decode(new Uint8Array(value))
+  }
+
+  return undefined
 }
 
 function moveObjectFields(response: SuiObjectResponse) {
@@ -220,7 +235,9 @@ function mapEventToActivity(event: SuiEvent): ActivityEvent | null {
   const timestamp = event.timestampMs
     ? new Date(Number(event.timestampMs)).toISOString()
     : new Date().toISOString()
-  const amountSui = mistToSui(parsed.amount ?? parsed.budget_ceiling ?? 0)
+  const amountSui = mistToSui(
+    parsed.amount ?? parsed.attempted_amount ?? parsed.budget_ceiling ?? 0
+  )
   const base = {
     id: `${digest}:${event.type}:${mandateId}`,
     mandateId,
@@ -274,6 +291,19 @@ function mapEventToActivity(event: SuiEvent): ActivityEvent | null {
       message: "Policy rejected agent action",
       title: "Policy rejected action",
       status: "blocked",
+    }
+  }
+
+  if (event.type.endsWith("BlockedEvent")) {
+    const reason = eventReason(parsed.reason) ?? "blocked_by_policy"
+    return {
+      ...base,
+      kind: "tx.blocked",
+      amount: amountSui,
+      amountSui,
+      message: "Policy block recorded on-chain before DeepBook submission.",
+      title: "Agent action blocked by Mandate policy",
+      status: reason,
     }
   }
 
@@ -339,12 +369,7 @@ function activityToExecution(
     side: "Buy",
     amountSui: event.amountSui ?? event.amount,
     status: "executed",
-    suiBalanceChange:
-      typeof event.amountSui === "number"
-        ? -event.amountSui
-        : typeof event.amount === "number"
-          ? -event.amount
-          : undefined,
+    suiBalanceChange: undefined,
   }
 }
 
@@ -527,7 +552,7 @@ export function MandateStoreProvider({
               mandate.ownerAddress.toLowerCase() === account.address.toLowerCase()
           )
         const mandateIds = createdMandates.map((mandate) => mandate.id)
-        const [activityEvents, revokeEvents, rejectEvents] = await Promise.all([
+        const [activityEvents, revokeEvents, rejectEvents, blockedEvents] = await Promise.all([
           Promise.all(mandateIds.map((id) => queryMandateActivityEvents(id))).then((pages) =>
             pages.flat()
           ),
@@ -537,9 +562,18 @@ export function MandateStoreProvider({
           Promise.all(mandateIds.map((id) => queryMandateRejectEvents(id))).then((pages) =>
             pages.flat()
           ),
+          Promise.all(mandateIds.map((id) => queryMandateBlockedEvents(id))).then((pages) =>
+            pages.flat()
+          ),
         ])
         const rpcActivities = uniqActivity(
-          [...createdEvents, ...activityEvents, ...revokeEvents, ...rejectEvents]
+          [
+            ...createdEvents,
+            ...activityEvents,
+            ...revokeEvents,
+            ...rejectEvents,
+            ...blockedEvents,
+          ]
             .map(mapEventToActivity)
             .filter((event): event is ActivityEvent => Boolean(event))
         )
@@ -687,6 +721,7 @@ export function MandateStoreProvider({
       digest,
       amountSui = 0.001,
       suiBalanceChange,
+      gasFeeSui,
       pair = DEEPBOOK_POOL_KEY,
       side = "Buy",
     }: {
@@ -694,6 +729,7 @@ export function MandateStoreProvider({
       digest?: string
       amountSui?: number
       suiBalanceChange?: number
+      gasFeeSui?: number
       pair?: string
       side?: "Buy" | "Sell"
     }) => {
@@ -753,7 +789,8 @@ export function MandateStoreProvider({
         side,
         amountSui,
         status: "executed",
-        suiBalanceChange: suiBalanceChange ?? -amountSui,
+        ...(typeof suiBalanceChange === "number" ? { suiBalanceChange } : {}),
+        ...(typeof gasFeeSui === "number" ? { gasFeeSui } : {}),
       }
 
       setExecutionHistory((prev) => {
@@ -770,10 +807,12 @@ export function MandateStoreProvider({
   const recordBlockedAction = React.useCallback(
     ({
       mandateId,
+      digest,
       amountSui,
       reason,
     }: {
       mandateId: string
+      digest?: string
       amountSui?: number
       reason: string
     }) => {
@@ -781,16 +820,17 @@ export function MandateStoreProvider({
         (mandate) => mandate.id === mandateId
       )
       const blockedActivity: ActivityEvent = {
-        id: randomId("blocked"),
+        id: digest ? `${digest}:optimistic-blocked:${mandateId}` : randomId("blocked"),
         kind: "tx.blocked",
         mandateId,
         agentName: target?.label ?? "Agent Wallet",
         protocol: target?.protocol ?? target?.protocols[0] ?? "DeepBook",
         amount: amountSui,
         amountSui,
-        message: "Agent action blocked by Mandate policy",
+        message: "Policy block recorded on-chain before DeepBook submission.",
         timestamp: new Date().toISOString(),
-        title: "Agent action blocked",
+        digest,
+        title: "Agent action blocked by Mandate policy",
         status: reason,
         timeDisplay: "just now",
       }

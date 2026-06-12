@@ -15,6 +15,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { CopyableId, shortId } from "@/components/copyable-id"
+import { ExplorerLink } from "@/components/explorer-link"
 import {
   Select,
   SelectContent,
@@ -37,6 +38,7 @@ type AgentRunResult = {
   activityEventFound: boolean
   deepBookPoolMutationFound: boolean
   balanceChangeSui: string
+  gasFeeSui: string
   blockedReason?: string
   error?: string
 }
@@ -79,6 +81,8 @@ const STRATEGIES: Record<
 
 const AGENT_MISMATCH_MESSAGE =
   "Agent wallet mismatch. The selected mandate must authorize the backend agent wallet."
+const PACKAGE_VERSION_MISMATCH_MESSAGE =
+  "Blocked event requires the latest Mandate package. Update PACKAGE_ID after publishing the upgraded contract."
 
 function ResultField({
   label,
@@ -143,6 +147,13 @@ function mandateExpiryLabel(mandate: {
 function normalizeAgentRunError(message: string) {
   const lower = message.toLowerCase()
   if (
+    lower.includes("record_blocked_action") &&
+    (lower.includes("unable to find function") || lower.includes("function"))
+  ) {
+    return PACKAGE_VERSION_MISMATCH_MESSAGE
+  }
+
+  if (
     lower.includes("moveabort") &&
     lower.includes("authorize_deepbook_spend_with_coin") &&
     (lower.includes("abort code: 2") || lower.includes("abort_code: 2"))
@@ -153,8 +164,26 @@ function normalizeAgentRunError(message: string) {
   return message
 }
 
+function isPackageVersionMismatch(message?: string | null) {
+  if (!message) {
+    return false
+  }
+
+  const lower = message.toLowerCase()
+  return (
+    message === PACKAGE_VERSION_MISMATCH_MESSAGE ||
+    (lower.includes("record_blocked_action") &&
+      (lower.includes("unable to find function") || lower.includes("function")))
+  )
+}
+
 function parseSuiBalanceChange(value: string) {
   const match = value.trim().match(/^(-?\d+(?:\.\d+)?)\s*SUI$/i)
+  return match ? Number(match[1]) : undefined
+}
+
+function parseSuiAmount(value: string) {
+  const match = value.trim().match(/^(\d+(?:\.\d+)?)\s*SUI$/i)
   return match ? Number(match[1]) : undefined
 }
 
@@ -293,32 +322,6 @@ export function AgentExecutionPanel() {
     agentWalletMatches &&
     protocolAllowed &&
     (selectedMandate?.status === "active" || strategy === "revoked_expired")
-  const blockedReason = React.useMemo(() => {
-    if (!selectedMandate) {
-      return "Create an active mandate before running the agent."
-    }
-    if (selectedMandate.status === "revoked") {
-      return "revoked"
-    }
-    if (selectedMandate.status === "expired") {
-      return "expired"
-    }
-    if (!protocolAllowed) {
-      return "protocol not allowed"
-    }
-    if (strategy === "exceed_budget" && selectedAmountSui > remainingBudget) {
-      return "exceeds remaining budget"
-    }
-    if (strategy === "exceed_per_tx" && selectedAmountSui > selectedMandate.txLimit) {
-      return "exceeds per-tx cap"
-    }
-    if (selectedAmountSui > remainingBudget) {
-      return "exceeds remaining budget"
-    }
-
-    return null
-  }, [protocolAllowed, remainingBudget, selectedAmountSui, selectedMandate, strategy])
-
   React.useEffect(() => {
     setResult(null)
     setError(null)
@@ -336,25 +339,6 @@ export function AgentExecutionPanel() {
 
   const runAgent = async () => {
     if (!canRunAgent || !selectedMandate) {
-      return
-    }
-
-    if (blockedReason) {
-      const blockedResult: AgentRunResult = {
-        digest: "",
-        status: "BLOCKED",
-        activityEventFound: false,
-        deepBookPoolMutationFound: false,
-        balanceChangeSui: "0 SUI",
-        blockedReason,
-      }
-      setResult(blockedResult)
-      setError(null)
-      recordBlockedAction({
-        mandateId: selectedMandate.id,
-        amountSui: selectedAmountSui,
-        reason: blockedReason,
-      })
       return
     }
 
@@ -388,10 +372,12 @@ export function AgentExecutionPanel() {
         const reason = payload.blockedReason ?? "Move policy rejected the agent action"
         recordBlockedAction({
           mandateId: selectedMandate.id,
+          digest: payload.digest,
           amountSui: selectedAmountSui,
           reason,
         })
-        setError(reason)
+        setError(null)
+        refreshMandates()
         return
       }
 
@@ -407,6 +393,7 @@ export function AgentExecutionPanel() {
         side: "Buy",
         amountSui: selectedAmountSui,
         suiBalanceChange: parseSuiBalanceChange(payload.balanceChangeSui),
+        gasFeeSui: parseSuiAmount(payload.gasFeeSui),
       })
       refreshMandates()
     } catch (caught) {
@@ -637,7 +624,10 @@ export function AgentExecutionPanel() {
                   label="Digest"
                   value={
                     result.digest ? (
-                      <CopyableId value={result.digest} label="digest" />
+                      <span className="inline-flex min-w-0 items-center gap-1">
+                        <CopyableId value={result.digest} label="digest" />
+                        <ExplorerLink digest={result.digest} />
+                      </span>
                     ) : (
                       "-"
                     )
@@ -684,7 +674,7 @@ export function AgentExecutionPanel() {
                   mono={result.deepBookPoolMutationFound}
                 />
                 <ResultField
-                  label="Gas / balance delta"
+                  label="Wallet delta"
                   value={result.balanceChangeSui}
                   mono
                 />
@@ -703,7 +693,9 @@ export function AgentExecutionPanel() {
                 <Alert className="border-amber-500/25 bg-amber-500/10">
                   <Ban className="size-4 text-amber-400" />
                   <AlertTitle>Agent action blocked by Mandate policy</AlertTitle>
-                  <AlertDescription className="mt-2 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                  <AlertDescription className="mt-2 space-y-3 text-sm">
+                    <p>Policy block recorded on-chain before DeepBook submission.</p>
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                     <span>
                       Attempted amount:{" "}
                       <span className="font-mono text-foreground">
@@ -728,6 +720,7 @@ export function AgentExecutionPanel() {
                         {result.blockedReason ?? "Move policy rejected the agent action"}
                       </span>
                     </span>
+                    </div>
                   </AlertDescription>
                 </Alert>
               ) : (
@@ -747,10 +740,12 @@ export function AgentExecutionPanel() {
                         <CopyableId value={selectedMandate.id} label="mandate id" />
                       </span>
                     )}
-                    <span className="block">
-                      Check whether the mandate is active and budget remains
-                      available.
-                    </span>
+                    {!isPackageVersionMismatch(error ?? result.error) && (
+                      <span className="block">
+                        Check whether the mandate is active and budget remains
+                        available.
+                      </span>
+                    )}
                   </AlertDescription>
                 </Alert>
               )}
@@ -770,10 +765,12 @@ export function AgentExecutionPanel() {
                   <CopyableId value={selectedMandate.id} label="mandate id" />
                 </span>
               )}
-              <span className="block">
-                Check whether the mandate is active and budget remains
-                available.
-              </span>
+              {!isPackageVersionMismatch(error) && (
+                <span className="block">
+                  Check whether the mandate is active and budget remains
+                  available.
+                </span>
+              )}
             </AlertDescription>
           </Alert>
         ) : (

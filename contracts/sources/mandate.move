@@ -92,6 +92,19 @@ public struct RejectEvent has copy, drop {
     timestamp_ms: u64,
 }
 
+/// Emitted when the backend agent records a policy-blocked attempt.
+///
+/// This path does not execute DeepBook and does not mutate mandate spend. It is
+/// used by PTBs that need an on-chain audit trail for blocked demo strategies.
+public struct BlockedEvent has copy, drop {
+    mandate_id: ID,
+    owner: address,
+    agent: address,
+    attempted_amount: u64,
+    reason: vector<u8>,
+    timestamp_ms: u64,
+}
+
 /// Returns the MVP DeepBook protocol constant for clients and tests.
 public fun deepbook_protocol(): u8 {
     PROTOCOL_DEEPBOOK
@@ -241,6 +254,31 @@ entry fun authorize_deepbook_spend_with_coin<T>(
         protocol: PROTOCOL_DEEPBOOK,
         timestamp_ms,
         success: true,
+    });
+}
+
+/// Records a blocked agent action without consuming budget.
+///
+/// Only the authorized agent can emit this event. The function intentionally
+/// does not enforce active/expiry/budget checks because it records those policy
+/// failures before any DeepBook submission is attempted.
+entry fun record_blocked_action(
+    mandate: &Mandate,
+    attempted_amount: u64,
+    reason: vector<u8>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let sender = tx_context::sender(ctx);
+    assert!(sender == mandate.agent, E_NOT_AGENT);
+
+    event::emit(BlockedEvent {
+        mandate_id: object::id(mandate),
+        owner: mandate.owner,
+        agent: sender,
+        attempted_amount,
+        reason,
+        timestamp_ms: clock::timestamp_ms(clock),
     });
 }
 

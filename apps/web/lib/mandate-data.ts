@@ -79,6 +79,7 @@ export type DeepBookOrder = {
   amountSui?: number
   status: ExecutionStatus
   suiBalanceChange?: number
+  gasFeeSui?: number
 }
 
 export const AGENTS: Agent[] = [

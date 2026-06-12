@@ -34,3 +34,15 @@ sui move test
 sui client publish --gas-budget 100000000
 npm run agent:swap
 ```
+
+## Testnet Deployment
+
+```bash
+npm run contract:test
+npm run contract:publish:testnet
+UPGRADE_CAP_ID=<upgrade-cap-object-id> npm run contract:upgrade:testnet
+npm run contract:extract-package
+```
+
+Update `NEXT_PUBLIC_PACKAGE_ID` and `PACKAGE_ID` with the extracted package id.
+If you publish a new package instead of upgrading, recreate the Mandate object.

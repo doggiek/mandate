@@ -4,7 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "agent:swap": "tsx scripts/agent-deepbook-swap.ts"
+    "agent:swap": "tsx scripts/agent-deepbook-swap.ts",
+    "agent:block": "tsx scripts/agent-record-blocked.ts",
+    "contract:test": "cd contracts && sui move test",
+    "contract:publish:testnet": "bash contracts/scripts/publish.sh",
+    "contract:upgrade:testnet": "bash contracts/scripts/upgrade.sh",
+    "contract:extract-package": "node contracts/scripts/extract-package-id.js"
   },
   "dependencies": {
     "@mysten/deepbook-v3": "^1.4.1",

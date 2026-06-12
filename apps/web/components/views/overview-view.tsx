@@ -15,7 +15,8 @@ import { WalletSummary } from "@/components/wallet-summary"
 import { StatCard } from "@/components/stat-card"
 import { MandateTable } from "@/components/mandate-table"
 import { ActivityFeed } from "@/components/activity-feed"
-import { DEEPBOOK_POOL_KEY } from "@/lib/chain-config"
+import { CopyableId } from "@/components/copyable-id"
+import { ExplorerLink } from "@/components/explorer-link"
 import { sortActivitiesByTimeDesc } from "@/lib/activity-utils"
 import { formatSui } from "@/lib/format"
 import { useMandateStore } from "@/lib/mandate-store"
@@ -55,15 +56,31 @@ export function OverviewView({
       (sum, mandate) => sum + mandate.budget,
       0
     )
+    const successfulOrders = orders.filter((order) => order.status !== "failed")
+    const totalExecutedAmount = successfulOrders.reduce(
+      (sum, order) => sum + (order.amountSui ?? 0),
+      0
+    )
+    const blockedActivities = activity.filter((event) => event.kind === "tx.blocked")
+    const totalBlockedAmount = blockedActivities.reduce(
+      (sum, event) => sum + (event.amountSui ?? event.amount ?? 0),
+      0
+    )
+    const latestExecution = [...successfulOrders].sort(
+      (a, b) => b.timestamp - a.timestamp
+    )[0]
 
     return {
       activeAgents: activeAgentKeys.size,
       activeMandates: activeMandates.length,
       authorizedBudget,
-      deepBookExecutions: orders.length,
-      blockedActions: activity.filter((event) => event.kind === "tx.blocked").length,
+      deepBookExecutions: successfulOrders.length,
+      totalExecutedAmount,
+      blockedActions: blockedActivities.length,
+      totalBlockedAmount,
+      latestExecution,
     }
-  }, [activeMandates, activity, orders.length])
+  }, [activeMandates, activity, orders])
   const recentActivity = React.useMemo(
     () => sortActivitiesByTimeDesc(activity).slice(0, 5),
     [activity]
@@ -75,7 +92,7 @@ export function OverviewView({
         <StatCard
           label="Active Agents"
           value={String(stats.activeAgents)}
-          sublabel="Authorized agent wallet"
+          sublabel="Authorized backend executors"
           icon={Bot}
         />
         <StatCard
@@ -87,18 +104,63 @@ export function OverviewView({
         <StatCard
           label="DeepBook Executions"
           value={String(stats.deepBookExecutions)}
-          sublabel={`${DEEPBOOK_POOL_KEY} PTBs`}
+          sublabel={`${formatSui(stats.totalExecutedAmount)} routed`}
           icon={CheckCircle2}
           accent="positive"
         />
         <StatCard
           label="Blocked Actions"
           value={String(stats.blockedActions)}
-          sublabel="Move policy enforced"
+          sublabel="Policy-enforced blocks"
           icon={Zap}
           accent="warning"
         />
       </section>
+
+      <Card className="border-primary/15 bg-card/80">
+        <CardHeader className="border-b border-border">
+          <CardTitle>Execution summary</CardTitle>
+          <CardDescription>
+            DeepBook routing and Mandate policy coverage
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-lg border border-border bg-background/60 p-3">
+            <p className="text-xs text-muted-foreground">Total executed</p>
+            <p className="mt-1 font-mono text-sm font-medium">
+              {formatSui(stats.totalExecutedAmount)}
+            </p>
+          </div>
+          <div className="rounded-lg border border-border bg-background/60 p-3">
+            <p className="text-xs text-muted-foreground">Total blocked</p>
+            <p className="mt-1 font-mono text-sm font-medium">
+              {formatSui(stats.totalBlockedAmount)}
+            </p>
+          </div>
+          <div className="rounded-lg border border-border bg-background/60 p-3">
+            <p className="text-xs text-muted-foreground">Latest execution</p>
+            <div className="mt-1 flex min-w-0 items-center gap-1 text-sm font-medium">
+              {stats.latestExecution?.digest ? (
+                <>
+                  <CopyableId
+                    value={stats.latestExecution.digest}
+                    label="latest execution digest"
+                  />
+                  <ExplorerLink digest={stats.latestExecution.digest} />
+                </>
+              ) : (
+                "-"
+              )}
+            </div>
+          </div>
+          <div className="rounded-lg border border-border bg-background/60 p-3">
+            <p className="text-xs text-muted-foreground">Policy coverage</p>
+            <p className="mt-1 text-sm font-medium">
+              DeepBook only / max tx / budget ceiling / expiry / revocation
+            </p>
+          </div>
+        </CardContent>
+      </Card>
 
       <WalletSummary />
       {(loading || error) && (

@@ -226,3 +226,50 @@ fun revoked_mandate_coin_authorization_fails() {
     clock::destroy_for_testing(clock);
     test_scenario::end(scenario);
 }
+
+/// Authorized agent can record a blocked attempt without consuming budget.
+#[test]
+fun agent_records_blocked_action_without_spend() {
+    let mut scenario = test_scenario::begin(OWNER);
+    let clock = new_clock(&mut scenario);
+
+    create_default_mandate(&mut scenario, &clock);
+
+    test_scenario::next_tx(&mut scenario, AGENT);
+    let mandate = test_scenario::take_shared<Mandate>(&scenario);
+    mandate::record_blocked_action(
+        &mandate,
+        21,
+        b"exceeds_per_tx_cap",
+        &clock,
+        test_scenario::ctx(&mut scenario),
+    );
+    assert!(mandate::current_spent(&mandate) == 0, 0);
+    test_scenario::return_shared(mandate);
+
+    clock::destroy_for_testing(clock);
+    test_scenario::end(scenario);
+}
+
+/// Non-agent wallets cannot record blocked attempts for the mandate.
+#[test]
+#[expected_failure(abort_code = 2)]
+fun non_agent_record_blocked_action_fails() {
+    let mut scenario = test_scenario::begin(OWNER);
+    let clock = new_clock(&mut scenario);
+
+    create_default_mandate(&mut scenario, &clock);
+
+    test_scenario::next_tx(&mut scenario, OTHER);
+    let mandate = test_scenario::take_shared<Mandate>(&scenario);
+    mandate::record_blocked_action(
+        &mandate,
+        21,
+        b"exceeds_per_tx_cap",
+        &clock,
+        test_scenario::ctx(&mut scenario),
+    );
+    test_scenario::return_shared(mandate);
+    clock::destroy_for_testing(clock);
+    test_scenario::end(scenario);
+}

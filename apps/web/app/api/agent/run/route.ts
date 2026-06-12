@@ -20,6 +20,7 @@ type AgentRunResult = {
   activityEventFound: boolean
   deepBookPoolMutationFound: boolean
   balanceChangeSui: string
+  gasFeeSui: string
   blockedReason?: string
   error?: string
 }
@@ -37,6 +38,7 @@ const EMPTY_RESULT: AgentRunResult = {
   activityEventFound: false,
   deepBookPoolMutationFound: false,
   balanceChangeSui: "0 SUI",
+  gasFeeSui: "-",
 }
 
 function readSection(output: string, label: string) {
@@ -46,16 +48,27 @@ function readSection(output: string, label: string) {
 
 function parseAgentOutput(output: string, error?: string): AgentRunResult {
   const status = readSection(output, "Status")
+  const blockedReasonText = readSection(output, "Blocked Reason")
   const errorText = error ?? readSection(output, "Failure Reason")
   const blockedReason = classifyBlockedReason(errorText)
   return {
     digest: readSection(output, "Digest"),
-    status: status === "SUCCESS" ? "SUCCESS" : blockedReason ? "BLOCKED" : "FAILED",
+    status:
+      status === "SUCCESS"
+        ? "SUCCESS"
+        : status === "BLOCKED"
+          ? "BLOCKED"
+          : blockedReason
+            ? "BLOCKED"
+            : "FAILED",
     activityEventFound: readSection(output, "Activity Event") === "FOUND",
     deepBookPoolMutationFound:
       readSection(output, "DeepBook Pool Mutation") === "FOUND",
     balanceChangeSui: readSection(output, "Balance Change") || "0 SUI",
-    ...(blockedReason ? { blockedReason } : {}),
+    gasFeeSui: readSection(output, "Gas Fee") || "-",
+    ...(blockedReasonText || blockedReason
+      ? { blockedReason: blockedReasonText || blockedReason }
+      : {}),
     ...(errorText ? { error: errorText } : {}),
   }
 }
@@ -82,7 +95,7 @@ function classifyBlockedReason(message?: string) {
     return "exceeds per-tx cap"
   }
   if (lower.includes("abort code: 7") || lower.includes("abort_code: 7")) {
-    return "exceeds budget ceiling"
+    return "exceeds remaining budget"
   }
   if (lower.includes("moveabort") || lower.includes("move abort")) {
     return "Move policy rejected the agent action"
@@ -111,16 +124,36 @@ function requestAmountSui(body: AgentRunRequest) {
     : "0.001"
 }
 
+function requestStrategy(body: AgentRunRequest) {
+  return typeof body.strategy === "string" ? body.strategy : "normal"
+}
+
+function requestBlockedReason(body: AgentRunRequest) {
+  const strategy = requestStrategy(body)
+  if (strategy === "exceed_per_tx") {
+    return "exceeds_per_tx_cap"
+  }
+  if (strategy === "exceed_budget") {
+    return "exceeds_remaining_budget"
+  }
+  if (strategy === "revoked_expired") {
+    return "inactive_mandate"
+  }
+
+  return undefined
+}
+
 export async function POST(request: Request) {
   const repoRoot = path.resolve(process.cwd(), "../..")
   const body = await readAgentRequest(request)
   const mandateId = requestMandateId(body)
   const amountSui = requestAmountSui(body)
+  const blockedReason = requestBlockedReason(body)
 
   try {
     const { stdout, stderr } = await execFileAsync(
       "npm",
-      ["run", "agent:swap", "--silent"],
+      ["run", blockedReason ? "agent:block" : "agent:swap", "--silent"],
       {
         cwd: repoRoot,
         env: {
@@ -129,6 +162,7 @@ export async function POST(request: Request) {
           MANDATE_ID: mandateId,
           POOL_KEY: DEEPBOOK_POOL_KEY,
           AMOUNT_SUI: amountSui,
+          ...(blockedReason ? { BLOCK_REASON: blockedReason } : {}),
         },
         timeout: 120_000,
         maxBuffer: 1024 * 1024,
