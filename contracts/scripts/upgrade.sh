@@ -22,5 +22,6 @@ sui client upgrade \
 
 echo
 echo "Saved upgrade output to $OUT_FILE"
-echo "Extract package id with:"
-echo "  node contracts/scripts/extract-package-id.js $OUT_FILE"
+node "$SCRIPT_DIR/extract-package-id.js" "$OUT_FILE"
+echo
+echo "Remember to update .env.local and restart Next.js"

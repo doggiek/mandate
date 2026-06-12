@@ -21,20 +21,39 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { ConsoleView } from "@/components/console-shell"
+import Link from "next/link"
 
-const NAV: { view: ConsoleView; label: string; icon: typeof LayoutDashboard }[] = [
-  { view: "overview", label: "Overview", icon: LayoutDashboard },
-  { view: "mandates", label: "Mandates", icon: ShieldCheck },
-  { view: "activity", label: "Activity Log", icon: ScrollText },
-  { view: "orders", label: "DeepBook Orders", icon: BookOpen },
+const NAV: {
+  view: ConsoleView
+  label: string
+  href: string
+  icon: typeof LayoutDashboard
+}[] = [
+  { view: "overview", label: "Overview", href: "/console", icon: LayoutDashboard },
+  {
+    view: "mandates",
+    label: "Mandates",
+    href: "/console/mandates",
+    icon: ShieldCheck,
+  },
+  {
+    view: "activity",
+    label: "Activity Log",
+    href: "/console/activity",
+    icon: ScrollText,
+  },
+  {
+    view: "orders",
+    label: "DeepBook Orders",
+    href: "/console/orders",
+    icon: BookOpen,
+  },
 ]
 
 export function AppSidebar({
   view,
-  onNavigate,
 }: {
   view: ConsoleView
-  onNavigate: (v: ConsoleView) => void
 }) {
   return (
     <Sidebar collapsible="icon" className="border-sidebar-border">
@@ -64,7 +83,7 @@ export function AppSidebar({
                   <SidebarMenuButton
                     isActive={view === item.view}
                     tooltip={item.label}
-                    onClick={() => onNavigate(item.view)}
+                    render={<Link href={item.href} />}
                   >
                     <item.icon />
                     <span>{item.label}</span>

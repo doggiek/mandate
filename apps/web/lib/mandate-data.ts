@@ -14,6 +14,7 @@ export type Mandate = {
   agent: Agent
   ownerAddress?: string
   agentAddress?: string
+  objectType?: string
   digest?: string
   status: MandateStatus
   /** total budget ceiling in SUI */
@@ -43,8 +44,6 @@ export type ActivityKind =
   | "tx.blocked"
   | "mandate.created"
   | "mandate.revoked"
-  | "budget.warning"
-  | "approval.requested"
 
 export type ActivityEvent = {
   id: string
@@ -57,11 +56,13 @@ export type ActivityEvent = {
   message: string
   /** ISO timestamp */
   timestamp: string
+  timestampMs?: number
   digest?: string
   title?: string
   status?: string
   amountSui?: number
   timeDisplay?: string
+  gasFeeSui?: number
 }
 
 export type ExecutionSide = "Buy" | "Sell"

@@ -69,14 +69,6 @@ const ACTIVITY_STYLES: Record<ActivityKind, { label: string; className: string }
     label: "Revoked",
     className: "border-destructive/30 bg-destructive/10 text-destructive",
   },
-  "budget.warning": {
-    label: "Budget",
-    className: "border-amber-500/25 bg-amber-500/10 text-amber-400",
-  },
-  "approval.requested": {
-    label: "Approval",
-    className: "border-amber-500/25 bg-amber-500/10 text-amber-400",
-  },
 }
 
 export function ActivityBadge({ kind }: { kind: ActivityKind }) {

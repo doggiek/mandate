@@ -322,12 +322,14 @@ export function CreateMandateDialog({
         description: `${shortId(mandateId)} · ${shortId(result.digest)}`,
       })
       refreshMandates()
+      window.setTimeout(refreshMandates, 1_200)
       if (closeTimeoutRef.current) {
         clearTimeout(closeTimeoutRef.current)
       }
       closeTimeoutRef.current = setTimeout(() => {
         handleOpenChange(false)
         refreshMandates()
+        window.setTimeout(refreshMandates, 1_200)
       }, 800)
     } catch (caught) {
       console.error("[MANDATE] failed", caught)

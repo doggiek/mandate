@@ -1,7 +1,13 @@
 "use client"
 
 import * as React from "react"
-import { AlertCircle, Ban, CheckCircle2, Play, RotateCcw } from "lucide-react"
+import {
+  AlertCircle,
+  Ban,
+  CheckCircle2,
+  Play,
+  RotateCcw,
+} from "lucide-react"
 
 import {
   Card,
@@ -16,6 +22,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { CopyableId, shortId } from "@/components/copyable-id"
 import { ExplorerLink } from "@/components/explorer-link"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   Select,
   SelectContent,
@@ -112,19 +119,22 @@ function SummaryChip({
   label,
   value,
   mono = false,
+  title,
 }: {
   label: string
   value: React.ReactNode
   mono?: boolean
+  title?: string
 }) {
   return (
-    <div className="flex min-h-[76px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 px-3 py-2">
+    <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 px-3 py-2">
       <span className="truncate text-xs text-muted-foreground">{label}</span>
       <div
         className={cn(
           "mt-2 min-w-0 truncate text-sm font-medium text-foreground",
           mono && "font-mono"
         )}
+        title={title}
       >
         {value ?? "-"}
       </div>
@@ -141,6 +151,9 @@ function mandateExpiryLabel(mandate: {
   expiresLabel?: string
   status: "active" | "expired" | "revoked"
 }) {
+  if (mandate.status === "expired") {
+    return "Expired"
+  }
   return mandate.expiresLabel ?? stableExpiryLabel(mandate.expiresAt, mandate.status)
 }
 
@@ -207,6 +220,34 @@ function strategyAmount(strategy: StrategyKey, mandate?: {
   return 0.001
 }
 
+function strategyBlockedReason(reason?: string) {
+  switch (reason) {
+    case "exceeds_per_tx_cap":
+      return "exceeds per-tx cap"
+    case "exceeds_remaining_budget":
+      return "exceeds remaining budget"
+    case "mandate_inactive_or_expired":
+      return "mandate inactive or expired"
+    default:
+      return reason ?? "Move policy rejected the agent action"
+  }
+}
+
+function isStrategyDisabled(
+  strategy: StrategyKey,
+  mandate?: { status: "active" | "expired" | "revoked" }
+) {
+  if (!mandate) {
+    return true
+  }
+
+  if (mandate.status === "active") {
+    return strategy === "revoked_expired"
+  }
+
+  return strategy !== "revoked_expired"
+}
+
 function mandateStatusDot(status: "active" | "expired" | "revoked") {
   if (status === "active") {
     return "bg-emerald-400"
@@ -220,6 +261,7 @@ function mandateStatusDot(status: "active" | "expired" | "revoked") {
 export function AgentExecutionPanel() {
   const {
     mandates,
+    loading,
     isWalletScoped,
     refreshMandates,
     recordAgentExecution,
@@ -295,13 +337,13 @@ export function AgentExecutionPanel() {
         copyable: false,
       },
       {
-        label: "Protocol",
-        value: selectedMandate?.protocol ?? selectedMandate?.protocols[0] ?? "DeepBook",
+        label: "Expires",
+        value: selectedMandate ? mandateExpiryLabel(selectedMandate) : "-",
         copyable: false,
       },
       {
-        label: "Expiration",
-        value: selectedMandate ? mandateExpiryLabel(selectedMandate) : "-",
+        label: "Created",
+        value: selectedMandate?.createdAtDisplay ?? "-",
         copyable: false,
       },
     ],
@@ -321,7 +363,7 @@ export function AgentExecutionPanel() {
     Boolean(selectedMandate) &&
     agentWalletMatches &&
     protocolAllowed &&
-    (selectedMandate?.status === "active" || strategy === "revoked_expired")
+    !isStrategyDisabled(strategy, selectedMandate)
   React.useEffect(() => {
     setResult(null)
     setError(null)
@@ -330,10 +372,9 @@ export function AgentExecutionPanel() {
   React.useEffect(() => {
     if (
       selectedMandate &&
-      selectedMandate.status !== "active" &&
-      strategy !== "revoked_expired"
+      isStrategyDisabled(strategy, selectedMandate)
     ) {
-      setStrategy("revoked_expired")
+      setStrategy(selectedMandate.status === "active" ? "normal" : "revoked_expired")
     }
   }, [selectedMandate, strategy])
 
@@ -417,7 +458,8 @@ export function AgentExecutionPanel() {
       <CardHeader className="border-b border-border">
         <CardTitle>Run Agent Strategy</CardTitle>
         <CardDescription>
-          Run a backend agent through a selected on-chain Mandate policy.
+          Run the backend agent under a selected Mandate; reconnect Slush if the
+          owner wallet changed.
         </CardDescription>
         <CardAction>
           <Button
@@ -440,7 +482,11 @@ export function AgentExecutionPanel() {
           <h3 className="text-sm font-semibold text-foreground">
             Select Mandate
           </h3>
-          {selectableMandates.length > 0 && (
+          {loading ? (
+            <div className="rounded-lg border border-border bg-background/60 p-3">
+              <Skeleton className="h-9 w-full" />
+            </div>
+          ) : selectableMandates.length > 0 && (
             <div className="rounded-lg border border-border bg-background/60 p-3">
             <Select
               value={selectedMandate?.id}
@@ -478,6 +524,7 @@ export function AgentExecutionPanel() {
                             <span className="capitalize">{mandate.status}</span>
                             {" · "}Budget {formatSui(mandate.budget)}
                             {" · "}Max {formatSui(mandate.txLimit)}
+                            {" · "}Created {mandate.createdAtDisplay ?? "-"}
                             {" · "}Expires {mandateExpiryLabel(mandate)}
                           </span>
                         </span>
@@ -490,7 +537,13 @@ export function AgentExecutionPanel() {
             </div>
           )}
 
-          {selectedMandate && (
+          {loading ? (
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <Skeleton key={index} className="h-[58px] rounded-lg" />
+              ))}
+            </div>
+          ) : selectedMandate && (
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
               {mandateSummary.map((item) => (
                 <SummaryChip
@@ -504,6 +557,7 @@ export function AgentExecutionPanel() {
                     )
                   }
                   mono={item.label === "Agent Wallet" || item.label === "Mandate ID"}
+                  title={typeof item.value === "string" ? item.value : undefined}
                 />
               ))}
             </div>
@@ -526,10 +580,7 @@ export function AgentExecutionPanel() {
             const value = key as StrategyKey
             const selected = strategy === value
             const isExpectedExecuted = option.expectation === "Executed"
-            const inactiveMandateSelected =
-              selectedMandate && selectedMandate.status !== "active"
-            const disabled =
-              Boolean(inactiveMandateSelected) && value !== "revoked_expired"
+            const disabled = isStrategyDisabled(value, selectedMandate)
 
             return (
               <button
@@ -674,8 +725,8 @@ export function AgentExecutionPanel() {
                   mono={result.deepBookPoolMutationFound}
                 />
                 <ResultField
-                  label="Wallet delta"
-                  value={result.balanceChangeSui}
+                  label="Gas Fee"
+                  value={result.gasFeeSui || "-"}
                   mono
                 />
               </div>
@@ -694,7 +745,10 @@ export function AgentExecutionPanel() {
                   <Ban className="size-4 text-amber-400" />
                   <AlertTitle>Agent action blocked by Mandate policy</AlertTitle>
                   <AlertDescription className="mt-2 space-y-3 text-sm">
-                    <p>Policy block recorded on-chain before DeepBook submission.</p>
+                    <p>
+                      Policy block recorded on-chain. No DeepBook order was
+                      submitted.
+                    </p>
                     <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                     <span>
                       Attempted amount:{" "}
@@ -717,7 +771,7 @@ export function AgentExecutionPanel() {
                     <span>
                       Block reason:{" "}
                       <span className="text-foreground">
-                        {result.blockedReason ?? "Move policy rejected the agent action"}
+                        {strategyBlockedReason(result.blockedReason)}
                       </span>
                     </span>
                     </div>

@@ -1,10 +1,10 @@
 import { execFile } from "node:child_process"
+import fs from "node:fs"
 import path from "node:path"
 import { promisify } from "node:util"
 import {
   CURRENT_MANDATE_ID,
   DEEPBOOK_POOL_KEY,
-  PACKAGE_ID,
 } from "@/lib/chain-config"
 
 const execFileAsync = promisify(execFile)
@@ -41,9 +41,83 @@ const EMPTY_RESULT: AgentRunResult = {
   gasFeeSui: "-",
 }
 
+let loggedPackageId = false
+
 function readSection(output: string, label: string) {
   const match = output.match(new RegExp(`${label}:\\s*\\n([^\\n]*)`))
   return match?.[1]?.trim() ?? ""
+}
+
+function readEnvFileValue(filePath: string, name: string) {
+  try {
+    const raw = fs.readFileSync(filePath, "utf8")
+    const line = raw
+      .split(/\r?\n/)
+      .find((entry) => entry.trim().startsWith(`${name}=`))
+    if (!line) {
+      return undefined
+    }
+    return line.slice(line.indexOf("=") + 1).trim().replace(/^['"]|['"]$/g, "")
+  } catch {
+    return undefined
+  }
+}
+
+function runtimeEnvValue(name: string, repoRoot: string) {
+  return (
+    process.env[name]?.trim() ||
+    readEnvFileValue(path.join(process.cwd(), ".env.local"), name) ||
+    readEnvFileValue(path.join(repoRoot, ".env.local"), name) ||
+    readEnvFileValue(path.join(repoRoot, ".env"), name)
+  )
+}
+
+function findRepoRoot() {
+  const cwd = process.cwd()
+  const candidates = [
+    cwd,
+    path.resolve(cwd, "../.."),
+    path.resolve(cwd, ".."),
+  ]
+
+  return (
+    candidates.find((candidate) =>
+      fs.existsSync(path.join(candidate, "scripts/agent-deepbook-swap.ts"))
+    ) ?? path.resolve(cwd, "../..")
+  )
+}
+
+function runtimePackageId(repoRoot: string) {
+  const serverPackageId = runtimeEnvValue("PACKAGE_ID", repoRoot)
+  const publicPackageId = runtimeEnvValue("NEXT_PUBLIC_PACKAGE_ID", repoRoot)
+
+  if (!serverPackageId && !publicPackageId) {
+    throw new Error(
+      "PACKAGE_ID is not configured. Set PACKAGE_ID and NEXT_PUBLIC_PACKAGE_ID in .env.local, then restart Next.js."
+    )
+  }
+
+  if (
+    serverPackageId &&
+    publicPackageId &&
+    serverPackageId.toLowerCase() !== publicPackageId.toLowerCase()
+  ) {
+    throw new Error(
+      "PACKAGE_ID and NEXT_PUBLIC_PACKAGE_ID do not match. Update .env.local so frontend and backend use the same Mandate package."
+    )
+  }
+
+  const packageId = serverPackageId ?? publicPackageId
+  if (!packageId) {
+    throw new Error("PACKAGE_ID is not configured.")
+  }
+
+  if (process.env.NODE_ENV !== "production" && !loggedPackageId) {
+    console.info(`[MANDATE] API using PACKAGE_ID ${packageId}`)
+    loggedPackageId = true
+  }
+
+  return packageId
 }
 
 function parseAgentOutput(output: string, error?: string): AgentRunResult {
@@ -137,18 +211,26 @@ function requestBlockedReason(body: AgentRunRequest) {
     return "exceeds_remaining_budget"
   }
   if (strategy === "revoked_expired") {
-    return "inactive_mandate"
+    return "mandate_inactive_or_expired"
   }
 
   return undefined
 }
 
 export async function POST(request: Request) {
-  const repoRoot = path.resolve(process.cwd(), "../..")
+  const repoRoot = findRepoRoot()
   const body = await readAgentRequest(request)
   const mandateId = requestMandateId(body)
   const amountSui = requestAmountSui(body)
   const blockedReason = requestBlockedReason(body)
+  let packageId: string
+
+  try {
+    packageId = runtimePackageId(repoRoot)
+  } catch (caught) {
+    const error = caught instanceof Error ? caught.message : String(caught)
+    return Response.json({ ...EMPTY_RESULT, error }, { status: 500 })
+  }
 
   try {
     const { stdout, stderr } = await execFileAsync(
@@ -158,7 +240,8 @@ export async function POST(request: Request) {
         cwd: repoRoot,
         env: {
           ...process.env,
-          PACKAGE_ID,
+          PACKAGE_ID: packageId,
+          NEXT_PUBLIC_PACKAGE_ID: packageId,
           MANDATE_ID: mandateId,
           POOL_KEY: DEEPBOOK_POOL_KEY,
           AMOUNT_SUI: amountSui,

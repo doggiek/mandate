@@ -7,6 +7,7 @@ import {
 import type {
   SuiEvent,
   SuiObjectResponse,
+  SuiTransactionBlockResponse,
 } from "@mysten/sui/jsonRpc"
 import { NETWORK, PACKAGE_ID } from "@/lib/chain-config"
 
@@ -129,6 +130,19 @@ export async function getMandateObject(
       showContent: true,
       showOwner: true,
       showPreviousTransaction: true,
+    },
+  })
+}
+
+export async function getTransactionDetails(
+  digest: string
+): Promise<SuiTransactionBlockResponse> {
+  return getSuiRpcClient().getTransactionBlock({
+    digest,
+    options: {
+      showBalanceChanges: true,
+      showEffects: true,
+      showEvents: true,
     },
   })
 }

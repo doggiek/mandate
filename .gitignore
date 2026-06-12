@@ -1,7 +1,12 @@
 .env
+.env.local
+.env.*.local
 node_modules/
 build/
 .next/
 apps/web/node_modules/
 apps/web/.next/
 contracts/build/
+contracts/Published.toml.bak
+contracts/deployments/testnet/*.json
+!contracts/deployments/testnet/.gitkeep

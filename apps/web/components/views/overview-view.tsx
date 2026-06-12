@@ -11,24 +11,173 @@ import {
 } from "@/components/ui/card"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { AgentExecutionPanel } from "@/components/agent-execution-panel"
-import { WalletSummary } from "@/components/wallet-summary"
-import { StatCard } from "@/components/stat-card"
 import { MandateTable } from "@/components/mandate-table"
 import { ActivityFeed } from "@/components/activity-feed"
 import { CopyableId } from "@/components/copyable-id"
 import { ExplorerLink } from "@/components/explorer-link"
+import { Skeleton } from "@/components/ui/skeleton"
 import { sortActivitiesByTimeDesc } from "@/lib/activity-utils"
 import { formatSui } from "@/lib/format"
 import { useMandateStore } from "@/lib/mandate-store"
-import {
-  ArrowRight,
-  Bot,
-  CheckCircle2,
-  Plus,
-  ShieldCheck,
-  Zap,
-} from "lucide-react"
+import { ArrowRight, Plus } from "lucide-react"
 import Link from "next/link"
+
+function SummaryMetricSkeleton() {
+  return (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div
+          key={index}
+          className="min-h-[92px] rounded-xl border border-border bg-card p-3"
+        >
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="mt-3 h-7 w-28" />
+          <Skeleton className="mt-2 h-3 w-32" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function MiniMetricsSkeleton() {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div
+          key={index}
+          className="min-h-[82px] rounded-xl border border-border bg-card/50 p-3"
+        >
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="mt-3 h-6 w-28" />
+          <Skeleton className="mt-2 h-3 w-32" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ConsoleOverviewSkeleton() {
+  return (
+    <section className="flex flex-col gap-3">
+      <div>
+        <Skeleton className="h-5 w-40" />
+        <Skeleton className="mt-2 h-3 w-72" />
+      </div>
+      <SummaryMetricSkeleton />
+      <MiniMetricsSkeleton />
+    </section>
+  )
+}
+
+function RunAgentSkeleton() {
+  return (
+    <Card className="border-primary/15 bg-card/80">
+      <CardHeader className="border-b border-border">
+        <Skeleton className="h-5 w-44" />
+        <Skeleton className="h-3 w-80 max-w-full" />
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4 p-4">
+        <Skeleton className="h-8 w-full rounded-lg" />
+        <section className="flex flex-col gap-3">
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-12 w-full rounded-lg" />
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <Skeleton key={index} className="h-[58px] rounded-lg" />
+            ))}
+          </div>
+        </section>
+        <section className="flex flex-col gap-3">
+          <Skeleton className="h-4 w-28" />
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <Skeleton key={index} className="h-[132px] rounded-lg" />
+            ))}
+          </div>
+        </section>
+        <section className="flex flex-col gap-3">
+          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-20 w-full rounded-lg" />
+        </section>
+      </CardContent>
+    </Card>
+  )
+}
+
+function OverviewSkeleton() {
+  return (
+    <div className="flex flex-col gap-4">
+      <ConsoleOverviewSkeleton />
+      <RunAgentSkeleton />
+      <OverviewListSkeleton />
+    </div>
+  )
+}
+
+function SummaryMetricCard({
+  label,
+  value,
+  helper,
+  mini = false,
+  title,
+}: {
+  label: string
+  value: React.ReactNode
+  helper: string
+  mini?: boolean
+  title?: string
+}) {
+  return (
+    <div
+      className={
+        mini
+          ? "flex min-h-[82px] min-w-0 flex-col justify-between rounded-xl border border-border bg-card/50 p-3"
+          : "flex min-h-[92px] min-w-0 flex-col justify-between rounded-xl border border-border bg-card p-3"
+      }
+    >
+      <p className="truncate text-xs text-muted-foreground">{label}</p>
+      <div
+        className="mt-2 min-w-0 truncate font-mono text-2xl font-semibold leading-tight tracking-tight text-foreground"
+        title={title}
+      >
+        {value}
+      </div>
+      <p className="mt-1 truncate text-xs text-muted-foreground/75">{helper}</p>
+    </div>
+  )
+}
+
+function OverviewListSkeleton() {
+  return (
+    <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+      <Card className="lg:col-span-2">
+        <CardHeader className="border-b border-border">
+          <Skeleton className="h-5 w-36" />
+          <Skeleton className="h-3 w-60" />
+        </CardHeader>
+        <CardContent className="space-y-3 p-4">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <Skeleton key={index} className="h-12 w-full rounded-lg" />
+          ))}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader className="border-b border-border">
+          <Skeleton className="h-5 w-32" />
+          <Skeleton className="h-3 w-40" />
+        </CardHeader>
+        <CardContent className="space-y-4 p-4">
+          {Array.from({ length: 5 }).map((_, index) => (
+            <div key={index} className="space-y-2">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-3 w-2/3" />
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    </section>
+  )
+}
 
 export function OverviewView({
   onSelectMandate,
@@ -86,92 +235,94 @@ export function OverviewView({
     [activity]
   )
 
-  return (
-    <div className="flex flex-col gap-6">
-      <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard
-          label="Active Agents"
-          value={String(stats.activeAgents)}
-          sublabel="Authorized backend executors"
-          icon={Bot}
-        />
-        <StatCard
-          label="Active Mandates"
-          value={String(stats.activeMandates)}
-          sublabel={`${formatSui(stats.authorizedBudget)} authorized`}
-          icon={ShieldCheck}
-        />
-        <StatCard
-          label="DeepBook Executions"
-          value={String(stats.deepBookExecutions)}
-          sublabel={`${formatSui(stats.totalExecutedAmount)} routed`}
-          icon={CheckCircle2}
-          accent="positive"
-        />
-        <StatCard
-          label="Blocked Actions"
-          value={String(stats.blockedActions)}
-          sublabel="Policy-enforced blocks"
-          icon={Zap}
-          accent="warning"
-        />
-      </section>
+  if (loading) {
+    return <OverviewSkeleton />
+  }
 
-      <Card className="border-primary/15 bg-card/80">
-        <CardHeader className="border-b border-border">
-          <CardTitle>Execution summary</CardTitle>
-          <CardDescription>
-            DeepBook routing and Mandate policy coverage
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-lg border border-border bg-background/60 p-3">
-            <p className="text-xs text-muted-foreground">Total executed</p>
-            <p className="mt-1 font-mono text-sm font-medium">
-              {formatSui(stats.totalExecutedAmount)}
-            </p>
-          </div>
-          <div className="rounded-lg border border-border bg-background/60 p-3">
-            <p className="text-xs text-muted-foreground">Total blocked</p>
-            <p className="mt-1 font-mono text-sm font-medium">
-              {formatSui(stats.totalBlockedAmount)}
-            </p>
-          </div>
-          <div className="rounded-lg border border-border bg-background/60 p-3">
-            <p className="text-xs text-muted-foreground">Latest execution</p>
-            <div className="mt-1 flex min-w-0 items-center gap-1 text-sm font-medium">
-              {stats.latestExecution?.digest ? (
-                <>
+  return (
+    <div className="flex flex-col gap-4">
+      <section className="flex flex-col gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-foreground">
+            Summary
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Delegated agent spending, executions, and policy blocks
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <SummaryMetricCard
+            label="Active Agents"
+            value={String(stats.activeAgents)}
+            helper="Authorized executors"
+          />
+          <SummaryMetricCard
+            label="Active Mandates"
+            value={String(stats.activeMandates)}
+            helper={`${formatSui(stats.authorizedBudget)} delegated`}
+          />
+          <SummaryMetricCard
+            label="Executed Volume"
+            value={formatSui(stats.totalExecutedAmount)}
+            helper={`${stats.deepBookExecutions} DeepBook runs`}
+          />
+          <SummaryMetricCard
+            label="Blocked Volume"
+            value={formatSui(stats.totalBlockedAmount)}
+            helper={`${stats.blockedActions} policy blocks`}
+          />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <SummaryMetricCard
+            mini
+            label="DeepBook Executions"
+            value={String(stats.deepBookExecutions)}
+            helper="Successful swaps"
+          />
+          <SummaryMetricCard
+            mini
+            label="Blocked Actions"
+            value={String(stats.blockedActions)}
+            helper="Prevented by policy"
+          />
+          <SummaryMetricCard
+            mini
+            label="Latest Execution"
+            value={
+              stats.latestExecution?.digest ? (
+                <span className="inline-flex min-w-0 items-center gap-1">
                   <CopyableId
                     value={stats.latestExecution.digest}
                     label="latest execution digest"
                   />
                   <ExplorerLink digest={stats.latestExecution.digest} />
-                </>
+                </span>
               ) : (
                 "-"
-              )}
-            </div>
-          </div>
-          <div className="rounded-lg border border-border bg-background/60 p-3">
-            <p className="text-xs text-muted-foreground">Policy coverage</p>
-            <p className="mt-1 text-sm font-medium">
-              DeepBook only / max tx / budget ceiling / expiry / revocation
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+              )
+            }
+            helper="Most recent successful PTB"
+          />
+          <SummaryMetricCard
+            mini
+            label="Policy Rules"
+            value="Max tx · Budget · Expiry · Revocation"
+            helper="Enforced before execution"
+            title="Max tx · Budget · Expiry · Revocation"
+          />
+        </div>
+      </section>
 
-      <WalletSummary />
-      {(loading || error) && (
-        <Card className={error ? "border-destructive/30" : undefined}>
+      <AgentExecutionPanel />
+
+      {error && (
+        <Card className="border-destructive/30">
           <CardContent className="p-4 text-sm text-muted-foreground">
-            {loading
-              ? "Loading Mandate data from Sui RPC..."
-              : `Unable to load Mandate data from Sui RPC: ${error}`}
+            {`Unable to load Mandate data from Sui RPC: ${error}`}
           </CardContent>
         </Card>
       )}
+
       {isWalletScoped && activeMandates.length === 0 && (
         <Card className="border-primary/15 bg-card/80">
           <CardContent className="grid gap-3 p-4 sm:grid-cols-4">
@@ -191,7 +342,6 @@ export function OverviewView({
           </CardContent>
         </Card>
       )}
-      <AgentExecutionPanel />
 
       <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">

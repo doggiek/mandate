@@ -34,15 +34,20 @@ import { Separator } from "@/components/ui/separator"
 import {
   CLOCK_OBJECT_ID,
   DEEPBOOK_POOL_KEY,
+  isCurrentMandateObjectType,
   NETWORK,
+  normalizeSuiAddress,
   PACKAGE_ID,
 } from "@/lib/chain-config"
 import { sortActivitiesByTimeDesc } from "@/lib/activity-utils"
-import { formatSui, relativeTime, stableExpiryLabel } from "@/lib/format"
+import { formatSui, stableExpiryLabel } from "@/lib/format"
 import { useMandateStore } from "@/lib/mandate-store"
+import { getMandateObject } from "@/lib/sui-rpc"
 import { cn } from "@/lib/utils"
 
 const REVOKE_TIMEOUT_MS = 180_000
+const OLD_PACKAGE_MESSAGE =
+  "This mandate was created by an older package. Create a new mandate with the latest package to revoke or test policy actions."
 
 function executionTime(timestamp: number) {
   const diffMs = Date.now() - timestamp
@@ -94,6 +99,11 @@ function withRevokeTimeout<T>(promise: Promise<T>) {
   })
 }
 
+function objectTypeFromResponse(response: Awaited<ReturnType<typeof getMandateObject>>) {
+  const content = response.data?.content
+  return content && content.dataType === "moveObject" ? content.type : undefined
+}
+
 function DetailMetric({
   label,
   value,
@@ -121,9 +131,11 @@ function DetailMetric({
 
 export function MandateDetailSheet({
   mandateId,
+  startRevokeNonce,
   onOpenChange,
 }: {
   mandateId: string | null
+  startRevokeNonce?: number
   onOpenChange: (open: boolean) => void
 }) {
   const {
@@ -189,13 +201,32 @@ export function MandateDetailSheet({
     })
   }, [confirmingRevoke])
 
+  React.useEffect(() => {
+    if (
+      !mandate ||
+      !startRevokeNonce ||
+      mandate.status !== "active" ||
+      (Boolean(mandate.objectType) &&
+        !isCurrentMandateObjectType(mandate.objectType))
+    ) {
+      return
+    }
+
+    setConfirmingRevoke(true)
+  }, [mandate?.id, mandate?.objectType, mandate?.status, startRevokeNonce])
+
   const remaining = mandate ? Math.max(mandate.budget - mandate.spent, 0) : 0
   const agentAddress = mandate?.agentAddress
   const ownerAddress = mandate?.ownerAddress
-  const canRevoke = mandate?.status === "active"
+  const isLatestPackageMandate =
+    Boolean(mandate) && isCurrentMandateObjectType(mandate?.objectType)
+  const isKnownOlderPackageMandate =
+    Boolean(mandate?.objectType) && !isLatestPackageMandate
   const isOwnerWallet =
     !mandate?.ownerAddress ||
-    account?.address?.toLowerCase() === mandate.ownerAddress.toLowerCase()
+    normalizeSuiAddress(account?.address) === normalizeSuiAddress(mandate.ownerAddress)
+  const canRevoke =
+    mandate?.status === "active" && !isKnownOlderPackageMandate && isOwnerWallet
 
   const signAndExecute = useSignAndExecuteTransaction<SuiTransactionBlockResponse>({
     execute: ({ bytes, signature }) =>
@@ -212,7 +243,9 @@ export function MandateDetailSheet({
   })
 
   const handleRevoke = async () => {
-    if (!mandate || !canRevoke || isRevoking) return
+    if (!mandate || isRevoking) return
+
+    if (!canRevoke) return
 
     if (!isOwnerWallet) {
       setRevokeError("Only the owner wallet can revoke this mandate.")
@@ -224,6 +257,14 @@ export function MandateDetailSheet({
     setRevokeError(null)
 
     try {
+      const objectType =
+        mandate.objectType ?? objectTypeFromResponse(await getMandateObject(mandate.id))
+      if (!isCurrentMandateObjectType(objectType)) {
+        setRevokeError(OLD_PACKAGE_MESSAGE)
+        setConfirmingRevoke(false)
+        return
+      }
+
       const tx = new Transaction()
       tx.moveCall({
         target: `${PACKAGE_ID}::mandate::revoke_mandate`,
@@ -309,6 +350,14 @@ export function MandateDetailSheet({
                     This mandate is revoked. Future agent execution attempts will
                     be rejected by policy checks.
                   </AlertDescription>
+                </Alert>
+              )}
+
+              {mandate.status === "active" && isKnownOlderPackageMandate && (
+                <Alert className="border-amber-500/25 bg-amber-500/10">
+                  <AlertTriangle className="size-4 text-amber-400" />
+                  <AlertTitle>Older Mandate package</AlertTitle>
+                  <AlertDescription>{OLD_PACKAGE_MESSAGE}</AlertDescription>
                 </Alert>
               )}
 
@@ -473,9 +522,12 @@ export function MandateDetailSheet({
                           </p>
                         </div>
                         <div className="flex flex-col items-end gap-1">
+                          <span className="text-[11px] text-muted-foreground">
+                            Gas Fee
+                          </span>
                           <span className="font-mono text-xs text-muted-foreground">
-                            {typeof execution.suiBalanceChange === "number"
-                              ? formatSui(execution.suiBalanceChange)
+                            {typeof execution.gasFeeSui === "number"
+                              ? formatSui(execution.gasFeeSui)
                               : "-"}
                           </span>
                         </div>
@@ -536,6 +588,13 @@ export function MandateDetailSheet({
                       variant="destructive"
                       disabled={!canRevoke || isRevoking}
                       onClick={() => setConfirmingRevoke(true)}
+                      title={
+                        isLatestPackageMandate
+                          ? "Permanently revoke owner-granted agent permission"
+                          : isKnownOlderPackageMandate
+                            ? OLD_PACKAGE_MESSAGE
+                            : "Verifying Mandate package before revoke"
+                      }
                     >
                       {isRevoking ? "Revoking" : "Revoke Mandate"}
                     </Button>

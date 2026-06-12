@@ -18,6 +18,7 @@ import { CreateMandateDialog } from "@/components/create-mandate-dialog"
 import { MandateDetailSheet } from "@/components/mandate-detail-sheet"
 import { MandateStoreProvider } from "@/lib/mandate-store"
 import { Plus } from "lucide-react"
+import { usePathname, useRouter } from "next/navigation"
 
 export type ConsoleView = "overview" | "mandates" | "activity" | "orders"
 
@@ -45,16 +46,28 @@ export function ConsoleShell({
 }: {
   initialView?: ConsoleView
 }) {
-  const [view, setView] = React.useState<ConsoleView>(initialView)
+  const pathname = usePathname()
+  const router = useRouter()
   const [createOpen, setCreateOpen] = React.useState(false)
   const [detailId, setDetailId] = React.useState<string | null>(null)
+  const [revokeRequest, setRevokeRequest] = React.useState<{
+    mandateId: string
+    nonce: number
+  } | null>(null)
 
+  const view = React.useMemo<ConsoleView>(() => {
+    if (pathname === "/console/mandates") return "mandates"
+    if (pathname === "/console/activity") return "activity"
+    if (pathname === "/console/orders") return "orders"
+    if (pathname === "/console/overview") return "overview"
+    return initialView
+  }, [initialView, pathname])
   const meta = VIEW_TITLES[view]
 
   return (
     <MandateStoreProvider>
       <SidebarProvider>
-        <AppSidebar view={view} onNavigate={setView} />
+        <AppSidebar view={view} />
         <SidebarInset>
           <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur-md md:px-6">
             <SidebarTrigger className="-ml-1" />
@@ -88,13 +101,17 @@ export function ConsoleShell({
                 <OverviewView
                   onSelectMandate={setDetailId}
                   onCreate={() => setCreateOpen(true)}
-                  onViewAll={() => setView("mandates")}
+                  onViewAll={() => router.push("/console/mandates")}
                 />
               )}
               {view === "mandates" && (
                 <MandatesView
                   onSelectMandate={setDetailId}
                   onCreate={() => setCreateOpen(true)}
+                  onRevokeMandate={(mandateId) => {
+                    setDetailId(mandateId)
+                    setRevokeRequest({ mandateId, nonce: Date.now() })
+                  }}
                 />
               )}
               {view === "activity" && <ActivityView />}
@@ -107,6 +124,9 @@ export function ConsoleShell({
       <CreateMandateDialog open={createOpen} onOpenChange={setCreateOpen} />
       <MandateDetailSheet
         mandateId={detailId}
+        startRevokeNonce={
+          revokeRequest?.mandateId === detailId ? revokeRequest.nonce : undefined
+        }
         onOpenChange={(open) => !open && setDetailId(null)}
       />
     </MandateStoreProvider>

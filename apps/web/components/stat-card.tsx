@@ -24,7 +24,7 @@ export function StatCard({
 
   return (
     <Card className="gap-0 py-0">
-      <CardContent className="flex flex-col gap-3 p-4">
+      <CardContent className="flex flex-col gap-2 p-3">
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium text-muted-foreground">
             {label}
@@ -32,7 +32,7 @@ export function StatCard({
           <Icon className={cn("size-4", accentColor)} />
         </div>
         <div className="flex flex-col gap-0.5">
-          <span className="text-2xl font-semibold tabular-nums tracking-tight">
+          <span className="text-xl font-semibold tabular-nums tracking-tight">
             {value}
           </span>
           {sublabel && (

@@ -6,6 +6,7 @@ export const NETWORK = (
 
 export const PACKAGE_ID =
   process.env.NEXT_PUBLIC_PACKAGE_ID ??
+  process.env.PACKAGE_ID ??
   "0x18675445cebd947ab5f5b5e01fcd101a343f44ec76f064cb77b2e23f1f878fbc"
 
 export const CURRENT_MANDATE_ID =
@@ -38,3 +39,33 @@ export function formatConfigId(value: string, prefixLength = 6, suffixLength = 4
 }
 
 export const NETWORK_LABEL = NETWORK.toUpperCase()
+
+export function normalizeSuiAddress(value?: string | null) {
+  const raw = value?.trim().toLowerCase()
+  if (!raw) {
+    return ""
+  }
+
+  const withoutPrefix = raw.startsWith("0x") ? raw.slice(2) : raw
+  const normalized = withoutPrefix.replace(/^0+/, "") || "0"
+  return `0x${normalized}`
+}
+
+export function mandatePackageFromObjectType(objectType?: string | null) {
+  return objectType?.split("::")[0] ?? ""
+}
+
+export function currentMandateObjectType(packageId = PACKAGE_ID) {
+  return `${packageId}::mandate::Mandate`
+}
+
+export function isCurrentMandateObjectType(objectType?: string | null) {
+  if (!objectType?.endsWith("::mandate::Mandate")) {
+    return false
+  }
+
+  return (
+    normalizeSuiAddress(mandatePackageFromObjectType(objectType)) ===
+    normalizeSuiAddress(PACKAGE_ID)
+  )
+}

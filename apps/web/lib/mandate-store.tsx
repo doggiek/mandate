@@ -2,7 +2,13 @@
 
 import * as React from "react"
 import { useCurrentAccount } from "@mysten/dapp-kit"
-import { DEEPBOOK_POOL_KEY, NETWORK } from "@/lib/chain-config"
+import {
+  currentMandateObjectType,
+  DEEPBOOK_POOL_KEY,
+  isCurrentMandateObjectType,
+  NETWORK,
+  PACKAGE_ID,
+} from "@/lib/chain-config"
 import {
   AGENTS,
   ALL_PROTOCOLS,
@@ -15,13 +21,18 @@ import {
 import { formatSui, stableExpiryLabel } from "@/lib/format"
 import {
   getMandateObject,
+  getTransactionDetails,
   queryMandateActivityEvents,
   queryMandateBlockedEvents,
   queryMandateCreatedEvents,
   queryMandateRejectEvents,
   queryMandateRevokeEvents,
 } from "@/lib/sui-rpc"
-import type { SuiEvent, SuiObjectResponse } from "@mysten/sui/jsonRpc"
+import type {
+  SuiEvent,
+  SuiObjectResponse,
+  SuiTransactionBlockResponse,
+} from "@mysten/sui/jsonRpc"
 
 const USER_MANDATES_KEY = `mandate:userMandates:${NETWORK}`
 const USER_ACTIVITY_KEY = `mandate:userActivity:${NETWORK}`
@@ -114,6 +125,51 @@ function clientTimeDisplay(iso: string) {
   return `${Math.floor(hours / 24)}d ago`
 }
 
+function displayTimeFromMs(value?: number) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? clientTimeDisplay(new Date(value).toISOString())
+    : "-"
+}
+
+function timestampMs(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+
+  return undefined
+}
+
+function deriveMandateStatus(mandate: Mandate): Mandate["status"] {
+  if (mandate.status === "revoked") {
+    return "revoked"
+  }
+
+  const expiresAt = new Date(mandate.expiresAt).getTime()
+  if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
+    return "expired"
+  }
+
+  return "active"
+}
+
+function normalizeMandateStatus(mandate: Mandate): Mandate {
+  const status = deriveMandateStatus(mandate)
+  return {
+    ...mandate,
+    status,
+    expiresLabel:
+      status === "expired"
+        ? "Expired"
+        : mandate.expiresLabel ?? stableExpiryLabel(mandate.expiresAt, status),
+    createdAtDisplay: clientTimeDisplay(mandate.createdAt),
+  }
+}
+
 function ttlLabel(ttl?: string) {
   switch (ttl) {
     case "3600000":
@@ -157,6 +213,15 @@ function eventReason(value: unknown) {
   return undefined
 }
 
+function eventTimestampMs(event: SuiEvent) {
+  return timestampMs(event.timestampMs)
+}
+
+function payloadTimestampMs(event: SuiEvent) {
+  const parsed = parsedJsonRecord(event)
+  return timestampMs(parsed.timestamp_ms) ?? timestampMs(parsed.created_at_ms)
+}
+
 function moveObjectFields(response: SuiObjectResponse) {
   const content = response.data?.content
   if (!content || content.dataType !== "moveObject") {
@@ -166,6 +231,11 @@ function moveObjectFields(response: SuiObjectResponse) {
   return "fields" in content && typeof content.fields === "object"
     ? (content.fields as Record<string, unknown>)
     : {}
+}
+
+function moveObjectType(response?: SuiObjectResponse) {
+  const content = response?.data?.content
+  return content && content.dataType === "moveObject" ? content.type : undefined
 }
 
 function mapCreatedEventToMandate(
@@ -181,19 +251,38 @@ function mapCreatedEventToMandate(
 
   const owner = parsed.owner
   const agent = parsed.agent ?? objectFields.agent
-  const expiresAtMs = Number(parsed.expires_at_ms ?? objectFields.expires_at_ms ?? 0)
+  const createdAtMs =
+    timestampMs(parsed.created_at_ms) ??
+    timestampMs(objectFields.created_at_ms) ??
+    timestampMs(event.timestampMs)
+  const expiresAtMs =
+    timestampMs(parsed.expires_at_ms) ??
+    timestampMs(objectFields.expires_at_ms) ??
+    0
   const isActive = objectFields.is_active !== false
   const currentSpent = objectFields.current_spent ?? 0
   const budgetCeiling = parsed.budget_ceiling ?? objectFields.budget_ceiling ?? 0
   const maxSingleTx = parsed.max_single_tx ?? objectFields.max_single_tx ?? 0
   const expiresAt = expiresAtMs > 0
     ? new Date(expiresAtMs).toISOString()
-    : new Date(Number(event.timestampMs ?? Date.now()) + 86_400_000).toISOString()
+    : new Date((createdAtMs ?? 0) + 86_400_000).toISOString()
+  const createdAt = createdAtMs
+    ? new Date(createdAtMs).toISOString()
+    : new Date(0).toISOString()
   const status: Mandate["status"] = !isActive
     ? "revoked"
-    : Date.now() > new Date(expiresAt).getTime()
+    : new Date(expiresAt).getTime() <= Date.now()
       ? "expired"
       : "active"
+  const objectType = moveObjectType(object)
+  if (process.env.NODE_ENV !== "production") {
+    console.info("[MANDATE] loaded mandate object", {
+      mandateId,
+      objectType,
+      packageId: PACKAGE_ID,
+      packageMatches: isCurrentMandateObjectType(objectType),
+    })
+  }
 
   return {
     id: mandateId,
@@ -201,14 +290,13 @@ function mapCreatedEventToMandate(
     agent: AGENTS[0],
     ownerAddress: typeof owner === "string" ? owner : undefined,
     agentAddress: typeof agent === "string" ? agent : undefined,
+    objectType,
     digest: eventDigest(event),
     status,
     budget: mistToSui(budgetCeiling),
     spent: mistToSui(currentSpent),
     protocols: ["DeepBook"],
-    createdAt: parsed.created_at_ms
-      ? new Date(Number(parsed.created_at_ms)).toISOString()
-      : new Date(Number(event.timestampMs ?? Date.now())).toISOString(),
+    createdAt,
     expiresAt,
     txLimit: mistToSui(maxSingleTx),
     approvalThreshold: mistToSui(maxSingleTx),
@@ -217,14 +305,28 @@ function mapCreatedEventToMandate(
     spentSui: mistToSui(currentSpent),
     maxSingleTxSui: mistToSui(maxSingleTx),
     protocol: "DeepBook",
-    expiresLabel: stableExpiryLabel(expiresAt, status),
-    createdAtDisplay: event.timestampMs
-      ? clientTimeDisplay(new Date(Number(event.timestampMs)).toISOString())
-      : undefined,
+    expiresLabel: status === "expired" ? "Expired" : stableExpiryLabel(expiresAt, status),
+    createdAtDisplay: clientTimeDisplay(createdAt),
   }
 }
 
-function mapEventToActivity(event: SuiEvent): ActivityEvent | null {
+function gasFeeSuiFromTransaction(tx?: SuiTransactionBlockResponse) {
+  const gasUsed = tx?.effects?.gasUsed
+  if (!gasUsed) {
+    return undefined
+  }
+
+  const computationCost = BigInt(gasUsed.computationCost)
+  const storageCost = BigInt(gasUsed.storageCost)
+  const storageRebate = BigInt(gasUsed.storageRebate)
+  const gasMist = computationCost + storageCost - storageRebate
+  return Number(gasMist) / 1_000_000_000
+}
+
+function mapEventToActivity(
+  event: SuiEvent,
+  tx?: SuiTransactionBlockResponse
+): ActivityEvent | null {
   const parsed = parsedJsonRecord(event)
   const mandateId = eventMandateId(event)
   if (!mandateId) {
@@ -232,20 +334,27 @@ function mapEventToActivity(event: SuiEvent): ActivityEvent | null {
   }
 
   const digest = eventDigest(event)
-  const timestamp = event.timestampMs
-    ? new Date(Number(event.timestampMs)).toISOString()
-    : new Date().toISOString()
+  const activityTimestampMs =
+    eventTimestampMs(event) ??
+    timestampMs(tx?.timestampMs) ??
+    payloadTimestampMs(event)
+  const timestamp = activityTimestampMs
+    ? new Date(activityTimestampMs).toISOString()
+    : ""
   const amountSui = mistToSui(
     parsed.amount ?? parsed.attempted_amount ?? parsed.budget_ceiling ?? 0
   )
+  const gasFeeSui = gasFeeSuiFromTransaction(tx)
   const base = {
     id: `${digest}:${event.type}:${mandateId}`,
     mandateId,
     agentName: "Agent Wallet",
     protocol: "DeepBook" as const,
     timestamp,
+    timestampMs: activityTimestampMs,
     digest,
-    timeDisplay: clientTimeDisplay(timestamp),
+    timeDisplay: displayTimeFromMs(activityTimestampMs),
+    ...(typeof gasFeeSui === "number" ? { gasFeeSui } : {}),
   }
 
   if (event.type.endsWith("CreatedEvent")) {
@@ -363,13 +472,13 @@ function activityToExecution(
     mandateId: event.mandateId,
     mandateLabel: mandate?.label ?? event.agentName ?? "Mandate",
     digest: event.digest,
-    timestamp: Number.isFinite(timestamp) ? timestamp : Date.now(),
+    timestamp: Number.isFinite(timestamp) ? timestamp : 0,
     protocol: "DeepBook",
     pair: DEEPBOOK_POOL_KEY,
     side: "Buy",
     amountSui: event.amountSui ?? event.amount,
     status: "executed",
-    suiBalanceChange: undefined,
+    gasFeeSui: event.gasFeeSui,
   }
 }
 
@@ -447,7 +556,6 @@ function mergeMandateMetadata(
     ...mandate,
     label: metadata.label || mandate.label,
     digest: mandate.digest || metadata.createdDigest,
-    createdAt: metadata.createdAt || mandate.createdAt,
     expiresLabel: ttlLabel(metadata.ttl) ?? mandate.expiresLabel,
   }
 }
@@ -508,6 +616,104 @@ export function MandateStoreProvider({
     writeStorageRecord(USER_METADATA_KEY, backfilledMetadata)
   }, [])
 
+  React.useEffect(() => {
+    const missingObjectType = userMandates.filter(
+      (mandate) => mandate.id && !mandate.objectType
+    )
+    if (missingObjectType.length === 0) {
+      return
+    }
+
+    let cancelled = false
+
+    async function backfillObjectTypes() {
+      const entries = await Promise.all(
+        missingObjectType.map(async (mandate) => {
+          try {
+            const object = await getMandateObject(mandate.id)
+            return [mandate.id, moveObjectType(object)] as const
+          } catch {
+            return [mandate.id, undefined] as const
+          }
+        })
+      )
+      const objectTypes = new Map(
+        entries.filter((entry): entry is readonly [string, string] =>
+          Boolean(entry[1])
+        )
+      )
+
+      if (cancelled || objectTypes.size === 0) {
+        return
+      }
+
+      setUserMandates((prev) => {
+        const next = prev.map((mandate) =>
+          mandate.objectType || !objectTypes.has(mandate.id)
+            ? mandate
+            : { ...mandate, objectType: objectTypes.get(mandate.id) }
+        )
+        writeStorageArray(USER_MANDATES_KEY, next)
+        return next
+      })
+    }
+
+    void backfillObjectTypes()
+
+    return () => {
+      cancelled = true
+    }
+  }, [userMandates])
+
+  React.useEffect(() => {
+    const missingGasFee = executionHistory.filter(
+      (execution) => execution.digest && typeof execution.gasFeeSui !== "number"
+    )
+    if (missingGasFee.length === 0) {
+      return
+    }
+
+    let cancelled = false
+
+    async function backfillGasFees() {
+      const entries = await Promise.all(
+        missingGasFee.map(async (execution) => {
+          try {
+            const tx = await getTransactionDetails(execution.digest)
+            return [execution.digest, gasFeeSuiFromTransaction(tx)] as const
+          } catch {
+            return [execution.digest, undefined] as const
+          }
+        })
+      )
+      const gasFees = new Map(
+        entries.filter((entry): entry is readonly [string, number] =>
+          typeof entry[1] === "number"
+        )
+      )
+
+      if (cancelled || gasFees.size === 0) {
+        return
+      }
+
+      setExecutionHistory((prev) => {
+        const next = prev.map((execution) =>
+          typeof execution.gasFeeSui === "number" || !gasFees.has(execution.digest)
+            ? execution
+            : { ...execution, gasFeeSui: gasFees.get(execution.digest) }
+        )
+        writeStorageArray(USER_EXECUTIONS_KEY, next)
+        return next
+      })
+    }
+
+    void backfillGasFees()
+
+    return () => {
+      cancelled = true
+    }
+  }, [executionHistory])
+
   const refreshMandates = React.useCallback(() => {
     setRefreshVersion((version) => version + 1)
   }, [])
@@ -566,15 +772,31 @@ export function MandateStoreProvider({
             pages.flat()
           ),
         ])
+        const allRpcEvents = [
+          ...createdEvents,
+          ...activityEvents,
+          ...revokeEvents,
+          ...rejectEvents,
+          ...blockedEvents,
+        ]
+        const txDigests = Array.from(
+          new Set(allRpcEvents.map(eventDigest).filter(Boolean))
+        )
+        const txEntries = await Promise.all(
+          txDigests.map(async (digest) => {
+            try {
+              return [digest, await getTransactionDetails(digest)] as const
+            } catch {
+              return [digest, undefined] as const
+            }
+          })
+        )
+        const txByDigest = new Map(txEntries)
         const rpcActivities = uniqActivity(
-          [
-            ...createdEvents,
-            ...activityEvents,
-            ...revokeEvents,
-            ...rejectEvents,
-            ...blockedEvents,
-          ]
-            .map(mapEventToActivity)
+          allRpcEvents
+            .map((event) =>
+              mapEventToActivity(event, txByDigest.get(eventDigest(event)))
+            )
             .filter((event): event is ActivityEvent => Boolean(event))
         )
 
@@ -618,6 +840,7 @@ export function MandateStoreProvider({
       agent,
       ownerAddress: input.ownerAddress,
       agentAddress: input.agentAddress,
+      objectType: currentMandateObjectType(),
       digest: input.digest,
       status: "active",
       budget: input.budget,
@@ -651,12 +874,12 @@ export function MandateStoreProvider({
       protocol: input.protocols[0],
       amount: input.budget,
       message: `Mandate created with ${formatSui(input.budget)} ceiling`,
-      timestamp: now.toISOString(),
+      timestamp: "",
       digest: input.digest,
       title: "Mandate created",
       status: "created",
       amountSui: input.budget,
-      timeDisplay: "just now",
+      timeDisplay: "syncing",
     }
 
     setUserMandates((prev) => {
@@ -699,11 +922,11 @@ export function MandateStoreProvider({
         agentName: target?.label ?? "Agent Wallet",
         protocol: target?.protocol ?? target?.protocols[0],
         message: "Owner revoked mandate",
-        timestamp: new Date().toISOString(),
+        timestamp: "",
         digest,
         title: "Owner revoked mandate",
         status: "revoked",
-        timeDisplay: "just now",
+        timeDisplay: "syncing",
       }
       setRpcActivity((prev) => uniqActivity([revokedActivity, ...prev]))
       setUserActivity((prev) => {
@@ -764,11 +987,11 @@ export function MandateStoreProvider({
         amount: amountSui,
         amountSui,
         message: "Agent executed DeepBook PTB under mandate",
-        timestamp: new Date().toISOString(),
+        timestamp: "",
         digest,
         title: "Agent executed DeepBook PTB",
         status: "success",
-        timeDisplay: "just now",
+        timeDisplay: "syncing",
       }
 
       setRpcActivity((prev) => uniqActivity([executionActivity, ...prev]))
@@ -828,11 +1051,11 @@ export function MandateStoreProvider({
         amount: amountSui,
         amountSui,
         message: "Policy block recorded on-chain before DeepBook submission.",
-        timestamp: new Date().toISOString(),
+        timestamp: "",
         digest,
         title: "Agent action blocked by Mandate policy",
         status: reason,
-        timeDisplay: "just now",
+        timeDisplay: "syncing",
       }
 
       setRpcActivity((prev) => uniqActivity([blockedActivity, ...prev]))
@@ -885,7 +1108,7 @@ export function MandateStoreProvider({
       ? [...rpcMandates, ...walletUserMandates]
       : []
     return uniqById(primary).map((mandate) =>
-      mergeMandateMetadata(mandate, userMetadata[mandate.id])
+      normalizeMandateStatus(mergeMandateMetadata(mandate, userMetadata[mandate.id]))
     )
   }, [account?.address, rpcMandates, userMetadata, walletUserMandates])
 
@@ -902,6 +1125,10 @@ export function MandateStoreProvider({
       const mandate = mandateById.get(event.mandateId)
       return {
         ...event,
+        timeDisplay:
+          event.timeDisplay === "just now" && typeof event.timestampMs !== "number"
+            ? undefined
+            : event.timeDisplay,
         agentName:
           mandate?.label ??
           (mandate?.agentAddress ? "Agent Wallet" : event.agentName),

@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment } from "react"
+import * as React from "react"
 import {
   Card,
   CardContent,
@@ -8,27 +8,48 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { CopyableId } from "@/components/copyable-id"
 import { ExplorerLink } from "@/components/explorer-link"
+import { Skeleton } from "@/components/ui/skeleton"
 import { DEEPBOOK_POOL_ID } from "@/lib/chain-config"
 import { formatSui } from "@/lib/format"
 import { useMandateStore } from "@/lib/mandate-store"
 
 const DEEPBOOK_PAIR = "DEEP/SUI"
 const DEEPBOOK_SIDE = "Buy"
+const PAGE_SIZE = 20
+
+function OrdersSkeleton() {
+  return (
+    <div className="divide-y divide-border">
+      <div className="grid grid-cols-[minmax(0,1.7fr)_minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,0.9fr)_minmax(0,0.8fr)_110px] gap-4 px-5 py-3">
+        {Array.from({ length: 6 }).map((_, index) => (
+          <Skeleton key={index} className="h-3 w-full" />
+        ))}
+      </div>
+      {Array.from({ length: 5 }).map((_, index) => (
+        <div key={index} className="space-y-3 px-5 py-4">
+          <div className="grid grid-cols-[minmax(0,1.7fr)_minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,0.9fr)_minmax(0,0.8fr)_110px] gap-4">
+            {Array.from({ length: 6 }).map((__, col) => (
+              <Skeleton key={col} className="h-5 w-full" />
+            ))}
+          </div>
+          <Skeleton className="h-3 w-2/3" />
+        </div>
+      ))}
+    </div>
+  )
+}
 
 function executionTime(timestamp: number) {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return "-"
+  }
+
   const diffMs = Date.now() - timestamp
-  if (!Number.isFinite(timestamp) || diffMs < 60_000) {
+  if (diffMs < 60_000) {
     return "just now"
   }
 
@@ -50,8 +71,14 @@ function executionStatusLabel(status: string) {
 }
 
 export function OrdersView() {
-  const { orders } = useMandateStore()
+  const { orders, loading } = useMandateStore()
+  const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE)
   const sortedOrders = [...orders].sort((a, b) => b.timestamp - a.timestamp)
+  const visibleOrders = sortedOrders.slice(0, visibleCount)
+
+  React.useEffect(() => {
+    setVisibleCount(PAGE_SIZE)
+  }, [orders.length])
 
   return (
     <Card>
@@ -62,26 +89,26 @@ export function OrdersView() {
         </CardDescription>
       </CardHeader>
       <CardContent className="p-0">
-        {sortedOrders.length > 0 ? (
-          <Table>
-            <TableHeader>
-              <TableRow className="border-border hover:bg-transparent">
-                <TableHead className="w-[26%] pl-5">Mandate</TableHead>
-                <TableHead className="w-[18%]">Digest</TableHead>
-                <TableHead className="w-[18%]">Pair / Side</TableHead>
-                <TableHead className="w-[14%]">Input Amount</TableHead>
-                <TableHead className="w-[12%]">Status</TableHead>
-                <TableHead className="w-[12%] pr-5 text-right">
-                  Time
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sortedOrders.map((execution) => (
-                <Fragment key={execution.id}>
-                <TableRow className="border-border align-top">
-                  <TableCell className="py-4 pl-5">
-                    <div className="flex min-w-0 flex-col gap-0.5">
+        {loading ? (
+          <OrdersSkeleton />
+        ) : sortedOrders.length > 0 ? (
+          <div className="divide-y divide-border">
+            <div className="grid grid-cols-[minmax(0,1.7fr)_minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,0.9fr)_minmax(0,0.8fr)_110px] gap-4 px-5 py-3 text-xs font-medium text-muted-foreground">
+              <span>Mandate</span>
+              <span>Digest</span>
+              <span>Pair / Side</span>
+              <span>Input Amount</span>
+              <span>Status</span>
+              <span className="text-right">Time</span>
+            </div>
+            {visibleOrders.map((execution) => (
+              <div
+                key={execution.id}
+                className="px-5 py-4 transition-colors hover:bg-muted/35"
+              >
+                <div className="grid grid-cols-[minmax(0,1.7fr)_minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,0.9fr)_minmax(0,0.8fr)_110px] items-start gap-4">
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 flex-col gap-1">
                       <span className="font-medium">
                         {execution.mandateLabel}
                       </span>
@@ -96,22 +123,22 @@ export function OrdersView() {
                         />
                       </span>
                     </div>
-                  </TableCell>
-                  <TableCell className="py-4">
+                  </div>
+                  <div className="min-w-0">
                     <span className="inline-flex min-w-0 items-center gap-1">
                       <CopyableId value={execution.digest} label="digest" />
                       <ExplorerLink digest={execution.digest} />
                     </span>
-                  </TableCell>
-                  <TableCell className="py-4">
+                  </div>
+                  <div className="min-w-0">
                     <div className="flex flex-col gap-0.5">
                       <span className="font-medium">{DEEPBOOK_PAIR}</span>
                       <span className="text-xs text-muted-foreground">
                         {execution.side ?? DEEPBOOK_SIDE} DEEP with SUI
                       </span>
                     </div>
-                  </TableCell>
-                  <TableCell className="py-4">
+                  </div>
+                  <div className="min-w-0">
                     <div className="flex flex-col gap-0.5">
                       <span className="font-mono text-sm">
                         {typeof execution.amountSui === "number"
@@ -122,8 +149,8 @@ export function OrdersView() {
                         Input
                       </span>
                     </div>
-                  </TableCell>
-                  <TableCell className="py-4">
+                  </div>
+                  <div className="min-w-0">
                     <Badge
                       variant="outline"
                       className={
@@ -136,62 +163,50 @@ export function OrdersView() {
                     </Badge>
                     {execution.status !== "failed" && (
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Filled
+                        Swap executed
                       </p>
                     )}
-                  </TableCell>
-                    <TableCell className="py-4 pr-5 text-right text-sm text-muted-foreground tabular-nums">
-                      {executionTime(execution.timestamp)}
-                    </TableCell>
-                  </TableRow>
-                  <TableRow
-                    className="border-border hover:bg-transparent"
-                  >
-                    <TableCell
-                      colSpan={6}
-                      className="px-5 pb-4 pt-0 text-xs text-muted-foreground"
-                    >
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                        <span>
-                          Protocol:{" "}
-                          <span className="text-foreground">
-                            {execution.protocol}
-                          </span>
-                        </span>
-                        <span className="inline-flex min-w-0 items-center gap-1">
-                          Pool:
-                          <CopyableId
-                            value={DEEPBOOK_POOL_ID}
-                            label="DeepBook pool object id"
-                          />
-                          <ExplorerLink
-                            objectId={DEEPBOOK_POOL_ID}
-                            label="View DeepBook pool on Suivision"
-                          />
-                        </span>
-                        <span>
-                          Gas Fee:{" "}
-                          <span className="font-mono text-foreground">
-                            {typeof execution.gasFeeSui === "number"
-                              ? formatSui(execution.gasFeeSui)
-                              : "-"}
-                          </span>
-                        </span>
-                        <span>
-                          Wallet Delta:{" "}
-                          <span className="font-mono text-foreground">
-                            {typeof execution.suiBalanceChange === "number"
-                              ? formatSui(execution.suiBalanceChange)
-                              : "-"}
-                          </span>
-                        </span>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                </Fragment>
-              ))}
-            </TableBody>
-          </Table>
+                  </div>
+                  <div className="min-w-[110px] text-right text-sm text-muted-foreground tabular-nums">
+                    {executionTime(execution.timestamp)}
+                  </div>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                  <span>Protocol: {execution.protocol}</span>
+                  <span className="inline-flex min-w-0 items-center gap-1">
+                    Pool:
+                    <CopyableId
+                      value={DEEPBOOK_POOL_ID}
+                      label="DeepBook pool object id"
+                    />
+                    <ExplorerLink
+                      objectId={DEEPBOOK_POOL_ID}
+                      label="View DeepBook pool on Suivision"
+                    />
+                  </span>
+                  <span>
+                    Gas Fee:{" "}
+                    <span className="font-mono">
+                      {typeof execution.gasFeeSui === "number"
+                        ? formatSui(execution.gasFeeSui)
+                        : "-"}
+                    </span>
+                  </span>
+                </div>
+              </div>
+            ))}
+            {visibleCount < sortedOrders.length && (
+              <div className="border-t border-border py-4 text-center">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setVisibleCount((count) => count + PAGE_SIZE)}
+                >
+                  Load more
+                </Button>
+              </div>
+            )}
+          </div>
         ) : (
           <div className="flex flex-col items-center gap-2 px-6 py-16 text-center">
             <p className="text-sm font-medium text-foreground">

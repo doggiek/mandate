@@ -35,12 +35,37 @@ sui client publish --gas-budget 100000000
 npm run agent:swap
 ```
 
-## Testnet Deployment
+## Quick Start
+
+```bash
+npm install
+cp .env.example .env.local
+```
+
+Fill in the environment variables, then run:
 
 ```bash
 npm run contract:test
+npm run dev
+```
+
+## Testnet Deployment
+
+Publish contract:
+
+```bash
 npm run contract:publish:testnet
+```
+
+Upgrade contract:
+
+```bash
 UPGRADE_CAP_ID=<upgrade-cap-object-id> npm run contract:upgrade:testnet
+```
+
+Extract package id:
+
+```bash
 npm run contract:extract-package
 ```
 
