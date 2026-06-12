@@ -44,10 +44,10 @@ import {
   useMandateStore,
 } from "@/lib/mandate-store"
 import {
-  AGENT_WALLET_ADDRESS,
   CLOCK_OBJECT_ID,
   NETWORK,
   PACKAGE_ID,
+  VERIFIED_AGENT_ADDRESS,
 } from "@/lib/chain-config"
 import { Loader2 } from "lucide-react"
 
@@ -163,7 +163,7 @@ export function CreateMandateDialog({
   const closeTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [label, setLabel] = React.useState("")
-  const [agentAddress, setAgentAddress] = React.useState(AGENT_WALLET_ADDRESS)
+  const [agentAddress, setAgentAddress] = React.useState(VERIFIED_AGENT_ADDRESS)
   const [budgetSui, setBudgetSui] = React.useState("0.1")
   const [txLimitSui, setTxLimitSui] = React.useState("0.01")
   const [ttlMs, setTtlMs] = React.useState(EXPIRATION_OPTIONS[2].value)
@@ -194,7 +194,7 @@ export function CreateMandateDialog({
 
   React.useEffect(() => {
     if (open && !agentAddress) {
-      setAgentAddress(AGENT_WALLET_ADDRESS)
+      setAgentAddress(VERIFIED_AGENT_ADDRESS)
     }
   }, [agentAddress, open])
 
@@ -219,7 +219,7 @@ export function CreateMandateDialog({
 
   function reset() {
     setLabel("")
-    setAgentAddress(AGENT_WALLET_ADDRESS)
+    setAgentAddress(VERIFIED_AGENT_ADDRESS)
     setBudgetSui("0.1")
     setTxLimitSui("0.01")
     setTtlMs(EXPIRATION_OPTIONS[2].value)
@@ -301,7 +301,7 @@ export function CreateMandateDialog({
       createMandate({
         id: mandateId,
         label: label.trim(),
-        agentId: AGENTS[1].id,
+        agentId: AGENTS[0].id,
         ownerAddress: account?.address,
         agentAddress: agentAddress.trim(),
         budget: Number(formatMistAsSui(budgetCeilingMist)),
@@ -382,8 +382,8 @@ export function CreateMandateDialog({
                   onChange={(event) => setAgentAddress(event.target.value)}
                 />
                 <FieldDescription>
-                  Agent wallet authorized to execute DeepBook PTBs under this
-                  mandate.
+                  This is the backend agent wallet. The owner keeps their key;
+                  the agent only receives a scoped Mandate object.
                 </FieldDescription>
               </Field>
             </div>

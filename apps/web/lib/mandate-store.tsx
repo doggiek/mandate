@@ -2,12 +2,13 @@
 
 import * as React from "react"
 import { useCurrentAccount } from "@mysten/dapp-kit"
-import { NETWORK } from "@/lib/chain-config"
+import { DEEPBOOK_POOL_KEY, NETWORK } from "@/lib/chain-config"
 import {
   AGENTS,
   ALL_PROTOCOLS,
   type ActivityEvent,
   type DeepBookOrder,
+  type ExecutionStatus,
   type Mandate,
   type Protocol,
 } from "@/lib/mandate-data"
@@ -57,8 +58,14 @@ type StoreContextValue = {
     digest?: string
     amountSui?: number
     suiBalanceChange?: number
+    pair?: string
+    side?: "Buy" | "Sell"
   }) => void
-  togglePause: (id: string) => void
+  recordBlockedAction: (input: {
+    mandateId: string
+    amountSui?: number
+    reason: string
+  }) => void
   refreshMandates: () => void
   clearUserDemoData: () => void
 }
@@ -75,12 +82,6 @@ const StoreContext = React.createContext<StoreContextValue | null>(null)
 
 function randomId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 8)}`
-}
-
-function toggledStatus(status: Mandate["status"]): Mandate["status"] {
-  if (status === "paused") return "active"
-  if (status === "active") return "paused"
-  return status
 }
 
 function mistToSui(value: unknown) {
@@ -181,8 +182,8 @@ function mapCreatedEventToMandate(
 
   return {
     id: mandateId,
-    label: "DeepBook Mandate",
-    agent: AGENTS[1],
+    label: "Mandate",
+    agent: AGENTS[0],
     ownerAddress: typeof owner === "string" ? owner : undefined,
     agentAddress: typeof agent === "string" ? agent : undefined,
     digest: eventDigest(event),
@@ -248,8 +249,8 @@ function mapEventToActivity(event: SuiEvent): ActivityEvent | null {
       kind: "tx.executed",
       amount: amountSui,
       amountSui,
-      message: "Agent authorized spend through Mandate policy object",
-      title: "Agent authorized spend",
+      message: "Agent executed DeepBook PTB under mandate",
+      title: "Agent executed DeepBook PTB",
       status: "success",
     }
   }
@@ -334,7 +335,10 @@ function activityToExecution(
     digest: event.digest,
     timestamp: Number.isFinite(timestamp) ? timestamp : Date.now(),
     protocol: "DeepBook",
-    status: "success",
+    pair: DEEPBOOK_POOL_KEY,
+    side: "Buy",
+    amountSui: event.amountSui ?? event.amount,
+    status: "executed",
     suiBalanceChange:
       typeof event.amountSui === "number"
         ? -event.amountSui
@@ -683,11 +687,15 @@ export function MandateStoreProvider({
       digest,
       amountSui = 0.001,
       suiBalanceChange,
+      pair = DEEPBOOK_POOL_KEY,
+      side = "Buy",
     }: {
       mandateId: string
       digest?: string
       amountSui?: number
       suiBalanceChange?: number
+      pair?: string
+      side?: "Buy" | "Sell"
     }) => {
       const incrementSpent = (mandate: Mandate) =>
         mandate.id === mandateId
@@ -719,10 +727,10 @@ export function MandateStoreProvider({
         protocol: target?.protocol ?? target?.protocols[0] ?? "DeepBook",
         amount: amountSui,
         amountSui,
-        message: "Agent authorized spend through Mandate policy object",
+        message: "Agent executed DeepBook PTB under mandate",
         timestamp: new Date().toISOString(),
         digest,
-        title: "Agent authorized spend",
+        title: "Agent executed DeepBook PTB",
         status: "success",
         timeDisplay: "just now",
       }
@@ -741,7 +749,10 @@ export function MandateStoreProvider({
         digest: digest ?? "",
         timestamp: Date.now(),
         protocol: "DeepBook",
-        status: "success",
+        pair,
+        side,
+        amountSui,
+        status: "executed",
         suiBalanceChange: suiBalanceChange ?? -amountSui,
       }
 
@@ -756,20 +767,43 @@ export function MandateStoreProvider({
     [rpcMandates, userMandates]
   )
 
-  const togglePause = React.useCallback((id: string) => {
-    setUserMandates((prev) => {
-      const next = prev.map((m) =>
-        m.id === id
-          ? {
-              ...m,
-              status: toggledStatus(m.status),
-            }
-          : m
+  const recordBlockedAction = React.useCallback(
+    ({
+      mandateId,
+      amountSui,
+      reason,
+    }: {
+      mandateId: string
+      amountSui?: number
+      reason: string
+    }) => {
+      const target = [...rpcMandates, ...userMandates].find(
+        (mandate) => mandate.id === mandateId
       )
-      writeStorageArray(USER_MANDATES_KEY, next)
-      return next
-    })
-  }, [])
+      const blockedActivity: ActivityEvent = {
+        id: randomId("blocked"),
+        kind: "tx.blocked",
+        mandateId,
+        agentName: target?.label ?? "Agent Wallet",
+        protocol: target?.protocol ?? target?.protocols[0] ?? "DeepBook",
+        amount: amountSui,
+        amountSui,
+        message: "Agent action blocked by Mandate policy",
+        timestamp: new Date().toISOString(),
+        title: "Agent action blocked",
+        status: reason,
+        timeDisplay: "just now",
+      }
+
+      setRpcActivity((prev) => uniqActivity([blockedActivity, ...prev]))
+      setUserActivity((prev) => {
+        const next = uniqById([blockedActivity, ...prev])
+        writeStorageArray(USER_ACTIVITY_KEY, next)
+        return next
+      })
+    },
+    [rpcMandates, userMandates]
+  )
 
   const clearUserDemoData = React.useCallback(() => {
     window.localStorage.removeItem(USER_MANDATES_KEY)
@@ -844,11 +878,20 @@ export function MandateStoreProvider({
     const activityExecutions = activity
       .map((event) => activityToExecution(event, mandateById.get(event.mandateId)))
       .filter((execution): execution is DeepBookOrder => Boolean(execution))
-    const localExecutions = executionHistory.map((execution) => ({
-      ...execution,
-      mandateLabel:
-        mandateById.get(execution.mandateId)?.label ?? execution.mandateLabel,
-    }))
+    const localExecutions: DeepBookOrder[] = executionHistory.map((execution) => {
+      const status: ExecutionStatus =
+        execution.status === "failed" ? "failed" : "executed"
+
+      return {
+        ...execution,
+        pair: execution.pair ?? DEEPBOOK_POOL_KEY,
+        side: execution.side ?? "Buy",
+        amountSui: execution.amountSui ?? 0.001,
+        status,
+        mandateLabel:
+          mandateById.get(execution.mandateId)?.label ?? execution.mandateLabel,
+      }
+    })
 
     return uniqExecutions([...activityExecutions, ...localExecutions]).sort(
       (a, b) => b.timestamp - a.timestamp
@@ -866,7 +909,7 @@ export function MandateStoreProvider({
       createMandate,
       revokeMandate,
       recordAgentExecution,
-      togglePause,
+      recordBlockedAction,
       refreshMandates,
       clearUserDemoData,
     }),
@@ -880,7 +923,7 @@ export function MandateStoreProvider({
       createMandate,
       revokeMandate,
       recordAgentExecution,
-      togglePause,
+      recordBlockedAction,
       refreshMandates,
       clearUserDemoData,
     ]

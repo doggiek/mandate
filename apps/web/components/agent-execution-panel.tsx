@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { AlertCircle, CheckCircle2, Play, RotateCcw } from "lucide-react"
+import { AlertCircle, Ban, CheckCircle2, Play, RotateCcw } from "lucide-react"
 
 import {
   Card,
@@ -23,8 +23,9 @@ import {
   SelectTrigger,
 } from "@/components/ui/select"
 import {
-  AGENT_WALLET_ADDRESS,
   DEEPBOOK_POOL_KEY,
+  DEEPBOOK_POOL_ID,
+  VERIFIED_AGENT_ADDRESS,
 } from "@/lib/chain-config"
 import { formatSui, stableExpiryLabel } from "@/lib/format"
 import { useMandateStore } from "@/lib/mandate-store"
@@ -32,11 +33,48 @@ import { cn } from "@/lib/utils"
 
 type AgentRunResult = {
   digest: string
-  status: "SUCCESS" | "FAILED"
+  status: "SUCCESS" | "BLOCKED" | "FAILED"
   activityEventFound: boolean
   deepBookPoolMutationFound: boolean
   balanceChangeSui: string
+  blockedReason?: string
   error?: string
+}
+
+type StrategyKey =
+  | "normal"
+  | "exceed_per_tx"
+  | "exceed_budget"
+  | "revoked_expired"
+
+const STRATEGIES: Record<
+  StrategyKey,
+  {
+    label: string
+    description: string
+    expectation: string
+  }
+> = {
+  normal: {
+    label: "Normal order",
+    description: "Swap 0.001 SUI through DeepBook.",
+    expectation: "Executed",
+  },
+  exceed_per_tx: {
+    label: "Per-tx guard",
+    description: "Attempt an amount above max single tx.",
+    expectation: "Blocked",
+  },
+  exceed_budget: {
+    label: "Budget guard",
+    description: "Attempt an amount above remaining budget.",
+    expectation: "Blocked",
+  },
+  revoked_expired: {
+    label: "Revocation / expiry guard",
+    description: "Verify inactive mandates cannot be used.",
+    expectation: "Blocked",
+  },
 }
 
 const AGENT_MISMATCH_MESSAGE =
@@ -52,15 +90,39 @@ function ResultField({
   mono?: boolean
 }) {
   return (
-    <div className="rounded-lg border border-border bg-background/60 p-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
+    <div className="flex min-h-[76px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
+      <p className="truncate text-xs text-muted-foreground">{label}</p>
       <div
         className={cn(
-          "mt-1 min-w-0 truncate text-sm font-medium text-foreground",
+          "mt-2 min-w-0 truncate text-sm font-medium text-foreground",
           mono && "font-mono"
         )}
       >
-        {value}
+        {value ?? "-"}
+      </div>
+    </div>
+  )
+}
+
+function SummaryChip({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string
+  value: React.ReactNode
+  mono?: boolean
+}) {
+  return (
+    <div className="flex min-h-[76px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 px-3 py-2">
+      <span className="truncate text-xs text-muted-foreground">{label}</span>
+      <div
+        className={cn(
+          "mt-2 min-w-0 truncate text-sm font-medium text-foreground",
+          mono && "font-mono"
+        )}
+      >
+        {value ?? "-"}
       </div>
     </div>
   )
@@ -73,7 +135,7 @@ function mandateCreatedTime(mandate: { createdAt: string }) {
 function mandateExpiryLabel(mandate: {
   expiresAt: string
   expiresLabel?: string
-  status: "active" | "expired" | "revoked" | "paused"
+  status: "active" | "expired" | "revoked"
 }) {
   return mandate.expiresLabel ?? stableExpiryLabel(mandate.expiresAt, mandate.status)
 }
@@ -96,49 +158,90 @@ function parseSuiBalanceChange(value: string) {
   return match ? Number(match[1]) : undefined
 }
 
+function strategyAmount(strategy: StrategyKey, mandate?: {
+  budget: number
+  spent: number
+  txLimit: number
+}) {
+  if (!mandate) {
+    return 0.001
+  }
+
+  const remaining = Math.max(mandate.budget - mandate.spent, 0)
+  if (strategy === "exceed_per_tx") {
+    return Number((mandate.txLimit + 0.001).toFixed(6))
+  }
+  if (strategy === "exceed_budget") {
+    return Number((remaining + 0.001).toFixed(6))
+  }
+
+  return 0.001
+}
+
+function mandateStatusDot(status: "active" | "expired" | "revoked") {
+  if (status === "active") {
+    return "bg-emerald-400"
+  }
+  if (status === "revoked") {
+    return "bg-destructive"
+  }
+  return "bg-muted-foreground"
+}
+
 export function AgentExecutionPanel() {
   const {
     mandates,
     isWalletScoped,
     refreshMandates,
     recordAgentExecution,
+    recordBlockedAction,
   } = useMandateStore()
   const [result, setResult] = React.useState<AgentRunResult | null>(null)
   const [isRunning, setIsRunning] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const [strategy, setStrategy] = React.useState<StrategyKey>("normal")
   const [selectedMandateId, setSelectedMandateId] = React.useState<string | null>(
     null
   )
 
-  const activeMandates = React.useMemo(() => {
+  const selectableMandates = React.useMemo(() => {
     if (!isWalletScoped) {
       return []
     }
 
-    return [...mandates]
-      .filter((mandate) => mandate.status === "active")
-      .sort((a, b) => mandateCreatedTime(b) - mandateCreatedTime(a))
+    return [...mandates].sort((a, b) => mandateCreatedTime(b) - mandateCreatedTime(a))
   }, [isWalletScoped, mandates])
+
+  const activeMandates = React.useMemo(() => {
+    return selectableMandates
+      .filter((mandate) => mandate.status === "active")
+  }, [selectableMandates])
 
   React.useEffect(() => {
     const latest = activeMandates[0]
-    const stillActive = activeMandates.some(
+    const stillPresent = selectableMandates.some(
       (mandate) => mandate.id === selectedMandateId
     )
 
-    if (!stillActive) {
-      setSelectedMandateId(latest?.id ?? null)
+    if (!stillPresent) {
+      setSelectedMandateId(latest?.id ?? selectableMandates[0]?.id ?? null)
     }
-  }, [activeMandates, selectedMandateId])
+  }, [activeMandates, selectableMandates, selectedMandateId])
 
   const selectedMandate = React.useMemo(
     () =>
-      activeMandates.find((mandate) => mandate.id === selectedMandateId) ??
-      activeMandates[0],
-    [activeMandates, selectedMandateId]
+      selectableMandates.find((mandate) => mandate.id === selectedMandateId) ??
+      activeMandates[0] ??
+      selectableMandates[0],
+    [activeMandates, selectableMandates, selectedMandateId]
   )
 
-  const executionSummary = React.useMemo(
+  const selectedAmountSui = React.useMemo(
+    () => strategyAmount(strategy, selectedMandate),
+    [selectedMandate, strategy]
+  )
+
+  const mandateSummary = React.useMemo(
     () => [
       {
         label: "Agent Wallet",
@@ -146,17 +249,19 @@ export function AgentExecutionPanel() {
         copyable: Boolean(selectedMandate?.agentAddress),
       },
       {
-        label: "Selected mandate id",
+        label: "Mandate ID",
         value: selectedMandate?.id,
         copyable: Boolean(selectedMandate?.id),
       },
       {
-        label: "Budget ceiling",
-        value: selectedMandate ? formatSui(selectedMandate.budget) : "-",
+        label: "Budget",
+        value: selectedMandate
+          ? `${formatSui(selectedMandate.spent)} / ${formatSui(selectedMandate.budget)}`
+          : "-",
         copyable: false,
       },
       {
-        label: "Max single tx",
+        label: "Max tx",
         value: selectedMandate ? formatSui(selectedMandate.txLimit) : "-",
         copyable: false,
       },
@@ -170,27 +275,86 @@ export function AgentExecutionPanel() {
         value: selectedMandate ? mandateExpiryLabel(selectedMandate) : "-",
         copyable: false,
       },
-      {
-        label: "Last verified digest",
-        value: result?.status === "SUCCESS" ? result.digest : undefined,
-        copyable: result?.status === "SUCCESS" && Boolean(result.digest),
-      },
     ],
-    [result?.digest, result?.status, selectedMandate]
+    [selectedMandate]
   )
   const selectedAgentAddress = selectedMandate?.agentAddress
+  const selectedProtocol =
+    selectedMandate?.protocol ?? selectedMandate?.protocols[0]
   const agentWalletMatches =
     Boolean(selectedAgentAddress) &&
-    selectedAgentAddress?.toLowerCase() === AGENT_WALLET_ADDRESS.toLowerCase()
-  const canRunAgent = Boolean(selectedMandate) && agentWalletMatches
+    selectedAgentAddress?.toLowerCase() === VERIFIED_AGENT_ADDRESS.toLowerCase()
+  const protocolAllowed = selectedProtocol === "DeepBook"
+  const remainingBudget = selectedMandate
+    ? Math.max(selectedMandate.budget - selectedMandate.spent, 0)
+    : 0
+  const canRunAgent =
+    Boolean(selectedMandate) &&
+    agentWalletMatches &&
+    protocolAllowed &&
+    (selectedMandate?.status === "active" || strategy === "revoked_expired")
+  const blockedReason = React.useMemo(() => {
+    if (!selectedMandate) {
+      return "Create an active mandate before running the agent."
+    }
+    if (selectedMandate.status === "revoked") {
+      return "revoked"
+    }
+    if (selectedMandate.status === "expired") {
+      return "expired"
+    }
+    if (!protocolAllowed) {
+      return "protocol not allowed"
+    }
+    if (strategy === "exceed_budget" && selectedAmountSui > remainingBudget) {
+      return "exceeds remaining budget"
+    }
+    if (strategy === "exceed_per_tx" && selectedAmountSui > selectedMandate.txLimit) {
+      return "exceeds per-tx cap"
+    }
+    if (selectedAmountSui > remainingBudget) {
+      return "exceeds remaining budget"
+    }
+
+    return null
+  }, [protocolAllowed, remainingBudget, selectedAmountSui, selectedMandate, strategy])
 
   React.useEffect(() => {
     setResult(null)
     setError(null)
-  }, [selectedMandate?.id])
+  }, [selectedMandate?.id, strategy])
+
+  React.useEffect(() => {
+    if (
+      selectedMandate &&
+      selectedMandate.status !== "active" &&
+      strategy !== "revoked_expired"
+    ) {
+      setStrategy("revoked_expired")
+    }
+  }, [selectedMandate, strategy])
 
   const runAgent = async () => {
     if (!canRunAgent || !selectedMandate) {
+      return
+    }
+
+    if (blockedReason) {
+      const blockedResult: AgentRunResult = {
+        digest: "",
+        status: "BLOCKED",
+        activityEventFound: false,
+        deepBookPoolMutationFound: false,
+        balanceChangeSui: "0 SUI",
+        blockedReason,
+      }
+      setResult(blockedResult)
+      setError(null)
+      recordBlockedAction({
+        mandateId: selectedMandate.id,
+        amountSui: selectedAmountSui,
+        reason: blockedReason,
+      })
       return
     }
 
@@ -203,10 +367,33 @@ export function AgentExecutionPanel() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ mandateId: selectedMandate.id }),
+        body: JSON.stringify({
+          mandateId: selectedMandate.id,
+          strategy,
+          amountSui: selectedAmountSui,
+          mandateMetadata: {
+            budgetSui: selectedMandate.budget,
+            spentSui: selectedMandate.spent,
+            remainingSui: remainingBudget,
+            maxSingleTxSui: selectedMandate.txLimit,
+            protocol: selectedProtocol,
+            status: selectedMandate.status,
+          },
+        }),
       })
       const payload = (await response.json()) as AgentRunResult
       setResult(payload)
+
+      if (payload.status === "BLOCKED") {
+        const reason = payload.blockedReason ?? "Move policy rejected the agent action"
+        recordBlockedAction({
+          mandateId: selectedMandate.id,
+          amountSui: selectedAmountSui,
+          reason,
+        })
+        setError(reason)
+        return
+      }
 
       if (!response.ok || payload.status !== "SUCCESS") {
         setError(normalizeAgentRunError(payload.error ?? "Agent execution failed"))
@@ -216,7 +403,9 @@ export function AgentExecutionPanel() {
       recordAgentExecution({
         mandateId: selectedMandate.id,
         digest: payload.digest,
-        amountSui: 0.001,
+        pair: DEEPBOOK_POOL_KEY,
+        side: "Buy",
+        amountSui: selectedAmountSui,
         suiBalanceChange: parseSuiBalanceChange(payload.balanceChangeSui),
       })
       refreshMandates()
@@ -234,13 +423,14 @@ export function AgentExecutionPanel() {
 
   const status = result?.status
   const isSuccess = status === "SUCCESS"
+  const isBlocked = status === "BLOCKED"
 
   return (
     <Card className="border-primary/15 bg-card/80">
       <CardHeader className="border-b border-border">
-        <CardTitle>Agent Execution</CardTitle>
+        <CardTitle>Run Agent Strategy</CardTitle>
         <CardDescription>
-          Run a predefined DeepBook strategy through the selected Mandate policy.
+          Run a backend agent through a selected on-chain Mandate policy.
         </CardDescription>
         <CardAction>
           <Button
@@ -259,52 +449,50 @@ export function AgentExecutionPanel() {
       </CardHeader>
       <CardContent className="flex flex-col gap-4 p-4">
         {/* Natural language planning is out of scope for MVP; this panel executes a predefined DeepBook strategy. */}
-        {activeMandates.length > 1 && (
-          <div className="rounded-lg border border-border bg-background/60 p-3">
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium text-foreground">
-                  Select active Mandate
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Choose which policy object authorizes the predefined DeepBook
-                  strategy.
-                </p>
-              </div>
-            </div>
+        <section className="flex flex-col gap-3">
+          <h3 className="text-sm font-semibold text-foreground">
+            Select Mandate
+          </h3>
+          {selectableMandates.length > 0 && (
+            <div className="rounded-lg border border-border bg-background/60 p-3">
             <Select
               value={selectedMandate?.id}
               onValueChange={(value) => value && setSelectedMandateId(value)}
             >
               <SelectTrigger className="h-auto w-full border-primary/20 bg-primary/5 py-2">
-                <span className="flex min-w-0 flex-col items-start gap-0.5 text-left">
-                  <span className="truncate text-sm font-medium">
-                    {selectedMandate?.label ?? "Select mandate"}
-                  </span>
-                  {selectedMandate && (
-                    <span className="truncate font-mono text-xs text-muted-foreground">
-                      {shortId(selectedMandate.id)}
-                    </span>
-                  )}
+                <span className="min-w-0 truncate text-left text-sm font-medium">
+                  {selectedMandate
+                    ? `${selectedMandate.label} (${shortId(selectedMandate.id)})`
+                    : "Select mandate"}
                 </span>
               </SelectTrigger>
               <SelectContent align="start" className="w-[min(560px,calc(100vw-2rem))]">
                 <SelectGroup>
-                  {activeMandates.map((mandate) => (
+                  {selectableMandates.map((mandate) => (
                     <SelectItem
                       key={mandate.id}
                       value={mandate.id}
                       className="py-2"
                     >
-                      <span className="flex min-w-0 flex-col gap-1">
-                        <span className="truncate font-medium">
-                          {mandate.label}
-                        </span>
-                        <span className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                          <span className="font-mono">{shortId(mandate.id)}</span>
-                          <span>Budget {formatSui(mandate.budget)}</span>
-                          <span>Max {formatSui(mandate.txLimit)}</span>
-                          <span>Expires {mandateExpiryLabel(mandate)}</span>
+                      <span className="flex min-w-0 items-start gap-2">
+                        <span
+                          className={cn(
+                            "mt-1.5 size-2 shrink-0 rounded-full",
+                            mandateStatusDot(mandate.status)
+                          )}
+                        />
+                        <span className="flex min-w-0 flex-col gap-1">
+                          <span className="truncate font-medium">
+                            {mandate.label}
+                          </span>
+                          <span className="truncate text-xs text-muted-foreground">
+                            <span className="font-mono">{shortId(mandate.id)}</span>
+                            {" · "}
+                            <span className="capitalize">{mandate.status}</span>
+                            {" · "}Budget {formatSui(mandate.budget)}
+                            {" · "}Max {formatSui(mandate.txLimit)}
+                            {" · "}Expires {mandateExpiryLabel(mandate)}
+                          </span>
                         </span>
                       </span>
                     </SelectItem>
@@ -312,31 +500,93 @@ export function AgentExecutionPanel() {
                 </SelectGroup>
               </SelectContent>
             </Select>
-          </div>
-        )}
+            </div>
+          )}
 
-        {selectedMandate && (
-          <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-7">
-            {executionSummary.map((item) => (
-              <ResultField
-                key={item.label}
-                label={item.label}
-                value={
-                  item.copyable && item.value ? (
-                    <CopyableId value={item.value} label={item.label.toLowerCase()} />
-                  ) : (
-                    item.value ?? "-"
-                  )
-                }
-                mono={
-                  item.label === "Agent Wallet" ||
-                  item.label === "Selected mandate id" ||
-                  item.label === "Last verified digest"
-                }
-              />
-            ))}
+          {selectedMandate && (
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+              {mandateSummary.map((item) => (
+                <SummaryChip
+                  key={item.label}
+                  label={item.label}
+                  value={
+                    item.copyable && item.value ? (
+                      <CopyableId value={item.value} label={item.label.toLowerCase()} />
+                    ) : (
+                      item.value ?? "-"
+                    )
+                  }
+                  mono={item.label === "Agent Wallet" || item.label === "Mandate ID"}
+                />
+              ))}
+            </div>
+          )}
+
+          {selectedMandate && !agentWalletMatches && (
+            <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
+              This mandate authorizes a different agent wallet. Create a mandate
+              for the verified backend agent.
+            </div>
+          )}
+        </section>
+
+        <section className="flex flex-col gap-3">
+          <h3 className="text-sm font-semibold text-foreground">
+            Select Strategy
+          </h3>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {Object.entries(STRATEGIES).map(([key, option]) => {
+            const value = key as StrategyKey
+            const selected = strategy === value
+            const isExpectedExecuted = option.expectation === "Executed"
+            const inactiveMandateSelected =
+              selectedMandate && selectedMandate.status !== "active"
+            const disabled =
+              Boolean(inactiveMandateSelected) && value !== "revoked_expired"
+
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => !disabled && setStrategy(value)}
+                disabled={disabled}
+                className={cn(
+                  "flex min-h-[132px] flex-col items-start gap-3 rounded-lg border bg-background/60 p-3 text-left transition",
+                  "hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+                  disabled && "cursor-not-allowed opacity-45 hover:border-border hover:bg-background/60",
+                  selected
+                    ? "border-cyan-400/50 bg-cyan-400/10 shadow-[0_0_24px_rgba(34,211,238,0.08)]"
+                    : "border-border"
+                )}
+                aria-pressed={selected}
+              >
+                <div className="flex w-full items-start justify-between gap-3">
+                  <span className="text-sm font-semibold text-foreground">
+                    {option.label}
+                  </span>
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "shrink-0 text-[11px] font-medium",
+                      isExpectedExecuted
+                        ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
+                        : "border-amber-500/25 bg-amber-500/10 text-amber-400"
+                    )}
+                  >
+                    Expected: {option.expectation}
+                  </Badge>
+                </div>
+                <span className="text-sm leading-snug text-muted-foreground">
+                  {option.description}
+                </span>
+                <span className="mt-auto font-mono text-xs text-muted-foreground">
+                  Input {formatSui(strategyAmount(value, selectedMandate))}
+                </span>
+              </button>
+            )
+          })}
           </div>
-        )}
+        </section>
 
         {!selectedMandate && (
           <Alert className="border-amber-500/25 bg-amber-500/10">
@@ -349,116 +599,161 @@ export function AgentExecutionPanel() {
           </Alert>
         )}
 
-        {selectedMandate && !agentWalletMatches && (
-          <Alert className="border-amber-500/25 bg-amber-500/10">
-            <AlertCircle className="size-4 text-amber-400" />
-            <AlertTitle>
-              This mandate is assigned to a different agent wallet.
-            </AlertTitle>
-            <AlertDescription className="space-y-2">
-              <span className="block">
-                Create a mandate for the configured backend agent.
-              </span>
-              <span className="block">
-                Configured backend agent{" "}
-                <CopyableId
-                  value={AGENT_WALLET_ADDRESS}
-                  label="backend agent wallet"
+        <section className="flex flex-col gap-3">
+          <h3 className="text-sm font-semibold text-foreground">
+            Execution Result
+          </h3>
+          {result ? (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <ResultField
+                  label="Status"
+                  value={
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "font-medium",
+                        isSuccess
+                          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
+                          : isBlocked
+                            ? "border-amber-500/25 bg-amber-500/10 text-amber-400"
+                            : "border-destructive/30 bg-destructive/10 text-destructive"
+                      )}
+                    >
+                      {result.status}
+                    </Badge>
+                  }
                 />
-              </span>
-            </AlertDescription>
-          </Alert>
-        )}
+                <ResultField
+                  label="Strategy"
+                  value={STRATEGIES[strategy].label}
+                />
+                <ResultField
+                  label="Input amount"
+                  value={formatSui(selectedAmountSui)}
+                  mono
+                />
+                <ResultField
+                  label="Digest"
+                  value={
+                    result.digest ? (
+                      <CopyableId value={result.digest} label="digest" />
+                    ) : (
+                      "-"
+                    )
+                  }
+                  mono
+                />
+              </div>
 
-        {result ? (
-          <>
-            <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-              <ResultField
-                label="Selected mandate id"
-                value={
-                  selectedMandate ? (
-                    <CopyableId value={selectedMandate.id} label="mandate id" />
-                  ) : (
-                    "Not selected"
-                  )
-                }
-                mono
-              />
-              <ResultField
-                label="Digest"
-                value={
-                  result.digest ? (
-                    <CopyableId value={result.digest} label="digest" />
-                  ) : (
-                    "Not returned"
-                  )
-                }
-                mono
-              />
-              <ResultField
-                label="Status"
-                value={
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      "font-medium",
-                      isSuccess
-                        ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
-                        : "border-destructive/30 bg-destructive/10 text-destructive"
-                    )}
-                  >
-                    {result.status}
-                  </Badge>
-                }
-              />
-              <ResultField
-                label="ActivityEvent"
-                value={result.activityEventFound ? "FOUND" : "MISSING"}
-              />
-              <ResultField
-                label="DeepBook Pool Mutation"
-                value={result.deepBookPoolMutationFound ? "FOUND" : "MISSING"}
-              />
-              <ResultField
-                label="SUI balance change"
-                value={result.balanceChangeSui}
-                mono
-              />
-            </div>
-
-            {isSuccess ? (
-              <Alert className="border-primary/25 bg-primary/10">
-                <CheckCircle2 className="size-4 text-primary" />
-                <AlertTitle>Agent execution completed</AlertTitle>
-                <AlertDescription>
-                  Mandate authorization and DeepBook swap result were returned
-                  by the server-side wrapper.
-                </AlertDescription>
-              </Alert>
-            ) : (
-              <Alert
-                variant="destructive"
-                className="border-destructive/30 bg-destructive/10"
-              >
-                <AlertCircle className="size-4" />
-                <AlertTitle>Error running agent</AlertTitle>
-                <AlertDescription className="space-y-2">
-                  <span className="block">
-                    {error ?? result.error ?? "No failure reason returned."}
-                  </span>
-                  {selectedMandate && (
-                    <span className="block">
-                      Selected mandate{" "}
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <ResultField
+                  label="Mandate ID"
+                  value={
+                    selectedMandate ? (
                       <CopyableId value={selectedMandate.id} label="mandate id" />
+                    ) : (
+                      "-"
+                    )
+                  }
+                  mono
+                />
+                <ResultField
+                  label="ActivityEvent"
+                  value={
+                    result.activityEventFound && result.digest ? (
+                      <CopyableId value={result.digest} label="activity event digest" />
+                    ) : (
+                      "-"
+                    )
+                  }
+                  mono={result.activityEventFound && Boolean(result.digest)}
+                />
+                <ResultField
+                  label="DeepBook Pool Object"
+                  value={
+                    result.deepBookPoolMutationFound ? (
+                      <CopyableId
+                        value={DEEPBOOK_POOL_ID}
+                        label="DeepBook pool object id"
+                      />
+                    ) : (
+                      "-"
+                    )
+                  }
+                  mono={result.deepBookPoolMutationFound}
+                />
+                <ResultField
+                  label="Gas / balance delta"
+                  value={result.balanceChangeSui}
+                  mono
+                />
+              </div>
+
+              {isSuccess ? (
+                <Alert className="border-primary/25 bg-primary/10">
+                  <CheckCircle2 className="size-4 text-primary" />
+                  <AlertTitle>Agent execution completed</AlertTitle>
+                  <AlertDescription>
+                    Mandate authorization and DeepBook swap result were returned
+                    by the server-side wrapper.
+                  </AlertDescription>
+                </Alert>
+              ) : isBlocked ? (
+                <Alert className="border-amber-500/25 bg-amber-500/10">
+                  <Ban className="size-4 text-amber-400" />
+                  <AlertTitle>Agent action blocked by Mandate policy</AlertTitle>
+                  <AlertDescription className="mt-2 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                    <span>
+                      Attempted amount:{" "}
+                      <span className="font-mono text-foreground">
+                        {formatSui(selectedAmountSui)}
+                      </span>
                     </span>
-                  )}
-                  <span className="block">
-                    Check whether the mandate is active and budget remains
-                    available.
-                  </span>
-                </AlertDescription>
-              </Alert>
-            )}
+                    <span>
+                      Remaining budget:{" "}
+                      <span className="font-mono text-foreground">
+                        {formatSui(remainingBudget)}
+                      </span>
+                    </span>
+                    <span>
+                      Max single tx:{" "}
+                      <span className="font-mono text-foreground">
+                        {selectedMandate ? formatSui(selectedMandate.txLimit) : "-"}
+                      </span>
+                    </span>
+                    <span>
+                      Block reason:{" "}
+                      <span className="text-foreground">
+                        {result.blockedReason ?? "Move policy rejected the agent action"}
+                      </span>
+                    </span>
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <Alert
+                  variant="destructive"
+                  className="border-destructive/30 bg-destructive/10"
+                >
+                  <AlertCircle className="size-4" />
+                  <AlertTitle>Error running agent</AlertTitle>
+                  <AlertDescription className="space-y-2">
+                    <span className="block">
+                      {error ?? result.error ?? "No failure reason returned."}
+                    </span>
+                    {selectedMandate && (
+                      <span className="block">
+                        Selected mandate{" "}
+                        <CopyableId value={selectedMandate.id} label="mandate id" />
+                      </span>
+                    )}
+                    <span className="block">
+                      Check whether the mandate is active and budget remains
+                      available.
+                    </span>
+                  </AlertDescription>
+                </Alert>
+              )}
           </>
         ) : error ? (
           <Alert
@@ -483,10 +778,10 @@ export function AgentExecutionPanel() {
           </Alert>
         ) : (
           <div className="rounded-lg border border-dashed border-border bg-background/50 p-4 text-sm text-muted-foreground">
-            No run yet. Click Run Agent to execute the verified DeepBook PTB and
-            stream the result back into the console.
+            No execution yet.
           </div>
         )}
+        </section>
       </CardContent>
     </Card>
   )

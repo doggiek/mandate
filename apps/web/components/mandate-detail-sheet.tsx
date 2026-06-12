@@ -37,23 +37,10 @@ import {
   NETWORK,
   PACKAGE_ID,
 } from "@/lib/chain-config"
+import { sortActivitiesByTimeDesc } from "@/lib/activity-utils"
 import { formatSui, relativeTime, stableExpiryLabel } from "@/lib/format"
 import { useMandateStore } from "@/lib/mandate-store"
 import { cn } from "@/lib/utils"
-
-const MOCK_OWNER_ADDRESS =
-  "0x91dc52b8d4b6e7815f4c7a2fb9b4384f7b32d1f0c69a4f1be265a8d94dd8b2c1"
-
-const MOCK_AGENT_ADDRESSES: Record<string, string> = {
-  ag_market:
-    "0x5f2a9c4b61d7e0a3c8f91b257de44a8c92301c5f77b1e839d0a5c16f22a4be90",
-  ag_treasury:
-    "0x74a6d91f0e43c8b2a51d069fe3b8472276ef19a3d8c402b5c0f119de642a9f0c",
-  ag_lp:
-    "0x2c7b803e5d16a9f4b8170e2f63d9c45a0bf7e8136c29d520ae4f731b8c09d2a4",
-  ag_arbitrage:
-    "0x39e71fabc50486d2a8f11c64b0ef5d9229a30478c2dc77a91ef4b6306dd9c5af",
-}
 
 const REVOKE_TIMEOUT_MS = 180_000
 
@@ -157,9 +144,9 @@ export function MandateDetailSheet({
   const closeTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const mandate = mandates.find((item) => item.id === mandateId)
-  const mandateActivity = activity
-    .filter((event) => event.mandateId === mandateId)
-    .slice(0, 4)
+  const mandateActivity = sortActivitiesByTimeDesc(
+    activity.filter((event) => event.mandateId === mandateId)
+  ).slice(0, 4)
   const mandateOrders = orders
     .filter((order) => order.mandateId === mandateId)
     .slice(0, 4)
@@ -203,12 +190,8 @@ export function MandateDetailSheet({
   }, [confirmingRevoke])
 
   const remaining = mandate ? Math.max(mandate.budget - mandate.spent, 0) : 0
-  const agentAddress = mandate
-    ? mandate.agentAddress ??
-      MOCK_AGENT_ADDRESSES[mandate.agent.id] ??
-      MOCK_AGENT_ADDRESSES.ag_market
-    : MOCK_AGENT_ADDRESSES.ag_market
-  const ownerAddress = mandate?.ownerAddress ?? MOCK_OWNER_ADDRESS
+  const agentAddress = mandate?.agentAddress
+  const ownerAddress = mandate?.ownerAddress
   const canRevoke = mandate?.status === "active"
   const isOwnerWallet =
     !mandate?.ownerAddress ||
@@ -395,13 +378,21 @@ export function MandateDetailSheet({
                 <DetailMetric
                   label="Owner address"
                   value={
-                    <CopyableId value={ownerAddress} label="owner address" />
+                    ownerAddress ? (
+                      <CopyableId value={ownerAddress} label="owner address" />
+                    ) : (
+                      "-"
+                    )
                   }
                 />
                 <DetailMetric
                   label="Agent address"
                   value={
-                    <CopyableId value={agentAddress} label="agent address" />
+                    agentAddress ? (
+                      <CopyableId value={agentAddress} label="agent address" />
+                    ) : (
+                      "-"
+                    )
                   }
                 />
                 <DetailMetric label="Protocol scope" value="DeepBook only" />
@@ -461,13 +452,24 @@ export function MandateDetailSheet({
                             />
                             <Badge
                               variant="outline"
-                              className="border-emerald-500/25 bg-emerald-500/10 capitalize text-emerald-400"
+                              className={
+                                execution.status === "failed"
+                                  ? "border-destructive/30 bg-destructive/10 text-destructive"
+                                  : "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
+                              }
                             >
-                              {execution.status}
+                              {execution.status === "failed"
+                                ? "Failed"
+                                : "Executed"}
                             </Badge>
                           </div>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {execution.protocol} · {executionTime(execution.timestamp)}
+                            {execution.pair ?? DEEPBOOK_POOL_KEY} ·{" "}
+                            {execution.side ?? "Buy"} ·{" "}
+                            {typeof execution.amountSui === "number"
+                              ? `${formatSui(execution.amountSui)} input`
+                              : "0.001 SUI input"}{" "}
+                            · {executionTime(execution.timestamp)}
                           </p>
                         </div>
                         <div className="flex flex-col items-end gap-1">

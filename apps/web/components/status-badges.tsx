@@ -1,18 +1,20 @@
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
-import type { MandateStatus, ActivityKind, OrderStatus } from "@/lib/mandate-data"
+import type {
+  ActivityKind,
+  ExecutionStatus,
+  MandateStatus,
+} from "@/lib/mandate-data"
 
 const STATUS_STYLES: Record<MandateStatus, string> = {
   active:
     "border-emerald-500/25 bg-emerald-500/10 text-emerald-400",
-  paused: "border-amber-500/25 bg-amber-500/10 text-amber-400",
   expired: "border-muted-foreground/20 bg-muted text-muted-foreground",
   revoked: "border-destructive/30 bg-destructive/10 text-destructive",
 }
 
 const STATUS_LABEL: Record<MandateStatus, string> = {
   active: "Active",
-  paused: "Paused",
   expired: "Expired",
   revoked: "Revoked",
 }
@@ -27,7 +29,6 @@ export function StatusBadge({ status }: { status: MandateStatus }) {
         className={cn(
           "size-1.5 rounded-full",
           status === "active" && "bg-emerald-400",
-          status === "paused" && "bg-amber-400",
           status === "expired" && "bg-muted-foreground",
           status === "revoked" && "bg-destructive"
         )}
@@ -37,17 +38,16 @@ export function StatusBadge({ status }: { status: MandateStatus }) {
   )
 }
 
-const ORDER_STYLES: Record<OrderStatus, string> = {
-  filled: "border-emerald-500/25 bg-emerald-500/10 text-emerald-400",
-  open: "border-sky-500/25 bg-sky-500/10 text-sky-400",
-  partial: "border-amber-500/25 bg-amber-500/10 text-amber-400",
-  cancelled: "border-muted-foreground/20 bg-muted text-muted-foreground",
+const ORDER_STYLES: Record<ExecutionStatus, string> = {
+  executed: "border-emerald-500/25 bg-emerald-500/10 text-emerald-400",
+  success: "border-emerald-500/25 bg-emerald-500/10 text-emerald-400",
+  failed: "border-destructive/30 bg-destructive/10 text-destructive",
 }
 
-export function OrderStatusBadge({ status }: { status: OrderStatus }) {
+export function OrderStatusBadge({ status }: { status: ExecutionStatus }) {
   return (
     <Badge variant="outline" className={cn("font-medium capitalize", ORDER_STYLES[status])}>
-      {status}
+      {status === "failed" ? "Failed" : "Executed"}
     </Badge>
   )
 }

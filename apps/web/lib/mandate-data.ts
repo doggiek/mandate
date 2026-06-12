@@ -1,8 +1,4 @@
-import {
-  NETWORK,
-} from "@/lib/chain-config"
-
-export type MandateStatus = "active" | "expired" | "revoked" | "paused"
+export type MandateStatus = "active" | "expired" | "revoked"
 
 export type Protocol = "DeepBook" | "Cetus" | "Scallop" | "Aftermath" | "Navi" | "SuiLend"
 
@@ -68,8 +64,8 @@ export type ActivityEvent = {
   timeDisplay?: string
 }
 
-export type OrderSide = "buy" | "sell"
-export type OrderStatus = "filled" | "open" | "partial" | "cancelled"
+export type ExecutionSide = "Buy" | "Sell"
+export type ExecutionStatus = "executed" | "success" | "failed"
 
 export type DeepBookOrder = {
   id: string
@@ -78,7 +74,10 @@ export type DeepBookOrder = {
   digest: string
   timestamp: number
   protocol: "DeepBook"
-  status: "success" | "failed"
+  pair: string
+  side: ExecutionSide
+  amountSui?: number
+  status: ExecutionStatus
   suiBalanceChange?: number
 }
 

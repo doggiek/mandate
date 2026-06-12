@@ -39,6 +39,10 @@ function executionTime(timestamp: number) {
   return `${Math.floor(hours / 24)}d ago`
 }
 
+function executionStatusLabel(status: string) {
+  return status === "failed" ? "Failed" : "Executed"
+}
+
 export function OrdersView() {
   const { orders } = useMandateStore()
 
@@ -58,8 +62,9 @@ export function OrdersView() {
                 <TableHead className="pl-4">Mandate</TableHead>
                 <TableHead>Digest</TableHead>
                 <TableHead>Protocol</TableHead>
+                <TableHead>Input Amount</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="text-right">SUI Balance Change</TableHead>
+                <TableHead className="text-right">Gas / Balance Delta</TableHead>
                 <TableHead className="hidden pr-4 text-right md:table-cell">
                   Time
                 </TableHead>
@@ -85,11 +90,27 @@ export function OrdersView() {
                   </TableCell>
                   <TableCell>{execution.protocol}</TableCell>
                   <TableCell>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-mono text-sm">
+                        {typeof execution.amountSui === "number"
+                          ? formatSui(execution.amountSui)
+                          : "0.001 SUI"}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {execution.pair ?? "DEEP_SUI"} · {execution.side ?? "Buy"}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell>
                     <Badge
                       variant="outline"
-                      className="border-emerald-500/25 bg-emerald-500/10 font-medium capitalize text-emerald-400"
+                      className={
+                        execution.status === "failed"
+                          ? "border-destructive/30 bg-destructive/10 font-medium text-destructive"
+                          : "border-emerald-500/25 bg-emerald-500/10 font-medium text-emerald-400"
+                      }
                     >
-                      {execution.status}
+                      {executionStatusLabel(execution.status)}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right font-mono text-sm tabular-nums">

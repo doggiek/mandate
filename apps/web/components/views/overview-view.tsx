@@ -9,13 +9,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { AgentExecutionPanel } from "@/components/agent-execution-panel"
 import { WalletSummary } from "@/components/wallet-summary"
 import { StatCard } from "@/components/stat-card"
 import { MandateTable } from "@/components/mandate-table"
 import { ActivityFeed } from "@/components/activity-feed"
 import { DEEPBOOK_POOL_KEY } from "@/lib/chain-config"
+import { sortActivitiesByTimeDesc } from "@/lib/activity-utils"
 import { formatSui } from "@/lib/format"
 import { useMandateStore } from "@/lib/mandate-store"
 import {
@@ -26,6 +27,7 @@ import {
   ShieldCheck,
   Zap,
 } from "lucide-react"
+import Link from "next/link"
 
 export function OverviewView({
   onSelectMandate,
@@ -47,6 +49,7 @@ export function OverviewView({
       activeMandates
         .map((mandate) => mandate.agentAddress)
         .filter((address): address is string => Boolean(address))
+        .map((address) => address.toLowerCase())
     )
     const authorizedBudget = activeMandates.reduce(
       (sum, mandate) => sum + mandate.budget,
@@ -61,6 +64,10 @@ export function OverviewView({
       blockedActions: activity.filter((event) => event.kind === "tx.blocked").length,
     }
   }, [activeMandates, activity, orders.length])
+  const recentActivity = React.useMemo(
+    () => sortActivitiesByTimeDesc(activity).slice(0, 5),
+    [activity]
+  )
 
   return (
     <div className="flex flex-col gap-6">
@@ -166,9 +173,18 @@ export function OverviewView({
           <CardHeader className="border-b border-border">
             <CardTitle>Recent activity</CardTitle>
             <CardDescription>Latest on-chain actions</CardDescription>
+            <CardAction>
+              <Link
+                href="/console/activity"
+                className={buttonVariants({ variant: "ghost", size: "sm" })}
+              >
+                View all
+                <ArrowRight data-icon="inline-end" />
+              </Link>
+            </CardAction>
           </CardHeader>
           <CardContent className="py-0">
-            <ActivityFeed events={activity.slice(0, 5)} />
+            <ActivityFeed events={recentActivity} />
           </CardContent>
         </Card>
       </section>

@@ -14,7 +14,6 @@ type Filter = "all" | MandateStatus
 const FILTERS: { value: Filter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "active", label: "Active" },
-  { value: "paused", label: "Paused" },
   { value: "expired", label: "Expired" },
   { value: "revoked", label: "Revoked" },
 ]

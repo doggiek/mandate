@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { ActivityFeed } from "@/components/activity-feed"
+import { sortActivitiesByTimeDesc } from "@/lib/activity-utils"
 import { useMandateStore } from "@/lib/mandate-store"
 import type { ActivityKind } from "@/lib/mandate-data"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
@@ -36,10 +37,11 @@ export function ActivityView() {
   const { activity, loading, error, isWalletScoped } = useMandateStore()
   const [kind, setKind] = React.useState<string>("all")
 
-  const filtered =
+  const filtered = sortActivitiesByTimeDesc(
     kind === "all"
       ? activity
       : activity.filter((e) => e.kind === (kind as ActivityKind))
+  )
 
   return (
     <Card>

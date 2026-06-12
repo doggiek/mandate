@@ -49,7 +49,7 @@ export function relativeTime(iso: string, referenceIso = DEMO_NOW_ISO): string {
 
 export function stableExpiryLabel(
   iso: string,
-  status?: "active" | "expired" | "revoked" | "paused"
+  status?: "active" | "expired" | "revoked"
 ): string {
   if (status === "expired") {
     return "Expired"

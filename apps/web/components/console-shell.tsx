@@ -40,8 +40,12 @@ const VIEW_TITLES: Record<ConsoleView, { title: string; subtitle: string }> = {
   },
 }
 
-export function ConsoleShell() {
-  const [view, setView] = React.useState<ConsoleView>("overview")
+export function ConsoleShell({
+  initialView = "overview",
+}: {
+  initialView?: ConsoleView
+}) {
+  const [view, setView] = React.useState<ConsoleView>(initialView)
   const [createOpen, setCreateOpen] = React.useState(false)
   const [detailId, setDetailId] = React.useState<string | null>(null)
 
