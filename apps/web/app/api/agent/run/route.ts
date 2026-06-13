@@ -41,6 +41,9 @@ const EMPTY_RESULT: AgentRunResult = {
   gasFeeSui: "-",
 }
 
+const OLD_PACKAGE_ERROR =
+  "Selected mandate belongs to an old package. Create a new mandate with the current package."
+
 let loggedPackageId = false
 
 function readSection(output: string, label: string) {
@@ -118,6 +121,99 @@ function runtimePackageId(repoRoot: string) {
   }
 
   return packageId
+}
+
+function runtimeAgentPrivateKey(repoRoot: string) {
+  const agentPrivateKey = runtimeEnvValue("AGENT_PRIVATE_KEY", repoRoot)
+
+  if (!agentPrivateKey) {
+    throw new Error(
+      "AGENT_PRIVATE_KEY is not configured. Set AGENT_PRIVATE_KEY in .env.local so Run Agent can be signed by the backend agent wallet."
+    )
+  }
+
+  return agentPrivateKey
+}
+
+function normalizeSuiAddress(value?: string | null) {
+  const raw = value?.trim().toLowerCase()
+  if (!raw) {
+    return ""
+  }
+
+  const withoutPrefix = raw.startsWith("0x") ? raw.slice(2) : raw
+  const normalized = withoutPrefix.replace(/^0+/, "") || "0"
+  return `0x${normalized}`
+}
+
+function mandatePackageFromObjectType(objectType?: string | null) {
+  return objectType?.split("::")[0] ?? ""
+}
+
+function isCurrentMandateObjectType(objectType: string | undefined, packageId: string) {
+  if (!objectType?.endsWith("::mandate::Mandate")) {
+    return false
+  }
+
+  return (
+    normalizeSuiAddress(mandatePackageFromObjectType(objectType)) ===
+    normalizeSuiAddress(packageId)
+  )
+}
+
+function fullnodeUrl() {
+  const network = runtimeEnvValue("NEXT_PUBLIC_SUI_NETWORK", findRepoRoot()) ?? "testnet"
+  if (network === "mainnet") {
+    return "https://fullnode.mainnet.sui.io:443"
+  }
+  if (network === "devnet") {
+    return "https://fullnode.devnet.sui.io:443"
+  }
+  if (network === "localnet") {
+    return "http://127.0.0.1:9000"
+  }
+  return "https://fullnode.testnet.sui.io:443"
+}
+
+async function fetchMandateObjectType(mandateId: string) {
+  const response = await fetch(fullnodeUrl(), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "sui_getObject",
+      params: [
+        mandateId,
+        {
+          showContent: true,
+        },
+      ],
+    }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Unable to fetch mandate object type: HTTP ${response.status}`)
+  }
+
+  const payload = (await response.json()) as {
+    error?: { message?: string }
+    result?: {
+      data?: {
+        content?: {
+          dataType?: string
+          type?: string
+        }
+      }
+    }
+  }
+
+  if (payload.error) {
+    throw new Error(payload.error.message ?? "Unable to fetch mandate object type")
+  }
+
+  const content = payload.result?.data?.content
+  return content?.dataType === "moveObject" ? content.type : undefined
 }
 
 function parseAgentOutput(output: string, error?: string): AgentRunResult {
@@ -224,9 +320,27 @@ export async function POST(request: Request) {
   const amountSui = requestAmountSui(body)
   const blockedReason = requestBlockedReason(body)
   let packageId: string
+  let agentPrivateKey: string
 
   try {
     packageId = runtimePackageId(repoRoot)
+    agentPrivateKey = runtimeAgentPrivateKey(repoRoot)
+  } catch (caught) {
+    const error = caught instanceof Error ? caught.message : String(caught)
+    return Response.json({ ...EMPTY_RESULT, error }, { status: 500 })
+  }
+
+  try {
+    const objectType = await fetchMandateObjectType(mandateId)
+    if (!isCurrentMandateObjectType(objectType, packageId)) {
+      return Response.json(
+        {
+          ...EMPTY_RESULT,
+          error: `${OLD_PACKAGE_ERROR} Expected ${packageId}::mandate::Mandate, got ${objectType ?? "unknown object type"}.`,
+        },
+        { status: 400 }
+      )
+    }
   } catch (caught) {
     const error = caught instanceof Error ? caught.message : String(caught)
     return Response.json({ ...EMPTY_RESULT, error }, { status: 500 })
@@ -240,11 +354,13 @@ export async function POST(request: Request) {
         cwd: repoRoot,
         env: {
           ...process.env,
+          AGENT_PRIVATE_KEY: agentPrivateKey,
           PACKAGE_ID: packageId,
           NEXT_PUBLIC_PACKAGE_ID: packageId,
           MANDATE_ID: mandateId,
           POOL_KEY: DEEPBOOK_POOL_KEY,
           AMOUNT_SUI: amountSui,
+          STRATEGY: requestStrategy(body),
           ...(blockedReason ? { BLOCK_REASON: blockedReason } : {}),
         },
         timeout: 120_000,

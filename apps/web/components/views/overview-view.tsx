@@ -31,7 +31,7 @@ function SummaryMetricSkeleton() {
           className="min-h-[92px] rounded-xl border border-border bg-card p-3"
         >
           <Skeleton className="h-3 w-24" />
-          <Skeleton className="mt-3 h-7 w-28" />
+          <Skeleton className="mt-3 h-6 w-24" />
           <Skeleton className="mt-2 h-3 w-32" />
         </div>
       ))}
@@ -45,10 +45,10 @@ function MiniMetricsSkeleton() {
       {Array.from({ length: 4 }).map((_, index) => (
         <div
           key={index}
-          className="min-h-[82px] rounded-xl border border-border bg-card/50 p-3"
+          className="min-h-[92px] rounded-xl border border-border bg-card/50 p-3"
         >
           <Skeleton className="h-3 w-24" />
-          <Skeleton className="mt-3 h-6 w-28" />
+          <Skeleton className="mt-3 h-6 w-24" />
           <Skeleton className="mt-2 h-3 w-32" />
         </div>
       ))}
@@ -131,18 +131,20 @@ function SummaryMetricCard({
     <div
       className={
         mini
-          ? "flex min-h-[82px] min-w-0 flex-col justify-between rounded-xl border border-border bg-card/50 p-3"
+          ? "flex min-h-[92px] min-w-0 flex-col justify-between rounded-xl border border-border bg-card/50 p-3"
           : "flex min-h-[92px] min-w-0 flex-col justify-between rounded-xl border border-border bg-card p-3"
       }
     >
       <p className="truncate text-xs text-muted-foreground">{label}</p>
       <div
-        className="mt-2 min-w-0 truncate font-mono text-2xl font-semibold leading-tight tracking-tight text-foreground"
+        className="mt-2 min-w-0 truncate font-mono text-xl font-semibold leading-tight tracking-tight text-foreground"
         title={title}
       >
         {value}
       </div>
-      <p className="mt-1 truncate text-xs text-muted-foreground/75">{helper}</p>
+      <p className="mt-1 truncate text-[11px] text-muted-foreground/70">
+        {helper}
+      </p>
     </div>
   )
 }
@@ -234,8 +236,10 @@ export function OverviewView({
     () => sortActivitiesByTimeDesc(activity).slice(0, 5),
     [activity]
   )
+  const isInitialLoading =
+    loading && mandates.length === 0 && activity.length === 0 && orders.length === 0
 
-  if (loading) {
+  if (isInitialLoading) {
     return <OverviewSkeleton />
   }
 
@@ -243,10 +247,10 @@ export function OverviewView({
     <div className="flex flex-col gap-4">
       <section className="flex flex-col gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-foreground">
+          <h2 className="text-base font-semibold text-foreground">
             Summary
           </h2>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Delegated agent spending, executions, and policy blocks
           </p>
         </div>
@@ -306,9 +310,9 @@ export function OverviewView({
           <SummaryMetricCard
             mini
             label="Policy Rules"
-            value="Max tx · Budget · Expiry · Revocation"
-            helper="Enforced before execution"
-            title="Max tx · Budget · Expiry · Revocation"
+            value="4 rules"
+            helper="Max tx · Budget · Expiry · Revoke"
+            title="Max tx · Budget · Expiry · Revoke"
           />
         </div>
       </section>

@@ -33,6 +33,7 @@ import {
 import {
   DEEPBOOK_POOL_KEY,
   DEEPBOOK_POOL_ID,
+  isCurrentMandateObjectType,
   VERIFIED_AGENT_ADDRESS,
 } from "@/lib/chain-config"
 import { formatSui, stableExpiryLabel } from "@/lib/format"
@@ -56,6 +57,28 @@ type StrategyKey =
   | "exceed_budget"
   | "revoked_expired"
 
+type RunContext = {
+  mandateId: string
+  mandateLabel: string
+  agentAddress?: string
+  amountSui: number
+  strategy: StrategyKey
+  remainingBudget: number
+  txLimit: number
+}
+
+type LastRunReceipt = {
+  result: AgentRunResult | null
+  error: string | null
+  context: RunContext | null
+}
+
+let lastRunReceipt: LastRunReceipt = {
+  result: null,
+  error: null,
+  context: null,
+}
+
 const STRATEGIES: Record<
   StrategyKey,
   {
@@ -66,22 +89,22 @@ const STRATEGIES: Record<
 > = {
   normal: {
     label: "Normal order",
-    description: "Swap 0.001 SUI through DeepBook.",
+    description: "Swap 0.001 SUI via DeepBook.",
     expectation: "Executed",
   },
   exceed_per_tx: {
     label: "Per-tx guard",
-    description: "Attempt an amount above max single tx.",
+    description: "Block amount above max tx.",
     expectation: "Blocked",
   },
   exceed_budget: {
     label: "Budget guard",
-    description: "Attempt an amount above remaining budget.",
+    description: "Block amount above remaining budget.",
     expectation: "Blocked",
   },
   revoked_expired: {
-    label: "Revocation / expiry guard",
-    description: "Verify inactive mandates cannot be used.",
+    label: "Inactive guard",
+    description: "Block revoked or expired mandates.",
     expectation: "Blocked",
   },
 }
@@ -90,6 +113,8 @@ const AGENT_MISMATCH_MESSAGE =
   "Agent wallet mismatch. The selected mandate must authorize the backend agent wallet."
 const PACKAGE_VERSION_MISMATCH_MESSAGE =
   "Blocked event requires the latest Mandate package. Update PACKAGE_ID after publishing the upgraded contract."
+const OLD_PACKAGE_MANDATE_MESSAGE =
+  "Selected mandate belongs to an old package. Create a new mandate with the current package."
 
 function ResultField({
   label,
@@ -142,6 +167,24 @@ function SummaryChip({
   )
 }
 
+function ResultStatusBadge({ status }: { status: AgentRunResult["status"] }) {
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        "font-medium",
+        status === "SUCCESS"
+          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
+          : status === "BLOCKED"
+            ? "border-amber-500/25 bg-amber-500/10 text-amber-400"
+            : "border-destructive/30 bg-destructive/10 text-destructive"
+      )}
+    >
+      {status}
+    </Badge>
+  )
+}
+
 function mandateCreatedTime(mandate: { createdAt: string }) {
   return new Date(mandate.createdAt).getTime()
 }
@@ -166,6 +209,10 @@ function normalizeAgentRunError(message: string) {
     return PACKAGE_VERSION_MISMATCH_MESSAGE
   }
 
+  if (lower.includes("old package")) {
+    return OLD_PACKAGE_MANDATE_MESSAGE
+  }
+
   if (
     lower.includes("moveabort") &&
     lower.includes("authorize_deepbook_spend_with_coin") &&
@@ -188,6 +235,10 @@ function isPackageVersionMismatch(message?: string | null) {
     (lower.includes("record_blocked_action") &&
       (lower.includes("unable to find function") || lower.includes("function")))
   )
+}
+
+function belongsToCurrentPackage(mandate?: { objectType?: string }) {
+  return Boolean(mandate?.objectType && isCurrentMandateObjectType(mandate.objectType))
 }
 
 function parseSuiBalanceChange(value: string) {
@@ -274,6 +325,13 @@ export function AgentExecutionPanel() {
   const [selectedMandateId, setSelectedMandateId] = React.useState<string | null>(
     null
   )
+  const [runContext, setRunContext] = React.useState<RunContext | null>(null)
+
+  React.useEffect(() => {
+    setResult(lastRunReceipt.result)
+    setError(lastRunReceipt.error)
+    setRunContext(lastRunReceipt.context)
+  }, [])
 
   const selectableMandates = React.useMemo(() => {
     if (!isWalletScoped) {
@@ -288,23 +346,28 @@ export function AgentExecutionPanel() {
       .filter((mandate) => mandate.status === "active")
   }, [selectableMandates])
 
+  const currentPackageActiveMandates = React.useMemo(() => {
+    return activeMandates.filter((mandate) => belongsToCurrentPackage(mandate))
+  }, [activeMandates])
+
   React.useEffect(() => {
-    const latest = activeMandates[0]
+    const latest = currentPackageActiveMandates[0]
     const stillPresent = selectableMandates.some(
       (mandate) => mandate.id === selectedMandateId
     )
+    const currentSelection = selectableMandates.find(
+      (mandate) => mandate.id === selectedMandateId
+    )
 
-    if (!stillPresent) {
-      setSelectedMandateId(latest?.id ?? selectableMandates[0]?.id ?? null)
+    if (!stillPresent || (!belongsToCurrentPackage(currentSelection) && latest)) {
+      setSelectedMandateId(latest?.id ?? null)
     }
-  }, [activeMandates, selectableMandates, selectedMandateId])
+  }, [currentPackageActiveMandates, selectableMandates, selectedMandateId])
 
   const selectedMandate = React.useMemo(
     () =>
-      selectableMandates.find((mandate) => mandate.id === selectedMandateId) ??
-      activeMandates[0] ??
-      selectableMandates[0],
-    [activeMandates, selectableMandates, selectedMandateId]
+      selectableMandates.find((mandate) => mandate.id === selectedMandateId),
+    [selectableMandates, selectedMandateId]
   )
 
   const selectedAmountSui = React.useMemo(
@@ -356,18 +419,28 @@ export function AgentExecutionPanel() {
     Boolean(selectedAgentAddress) &&
     selectedAgentAddress?.toLowerCase() === VERIFIED_AGENT_ADDRESS.toLowerCase()
   const protocolAllowed = selectedProtocol === "DeepBook"
+  const packageAllowed = belongsToCurrentPackage(selectedMandate)
   const remainingBudget = selectedMandate
     ? Math.max(selectedMandate.budget - selectedMandate.spent, 0)
     : 0
   const canRunAgent =
     Boolean(selectedMandate) &&
+    packageAllowed &&
     agentWalletMatches &&
     protocolAllowed &&
     !isStrategyDisabled(strategy, selectedMandate)
-  React.useEffect(() => {
+  const showMandateLoading = loading && selectableMandates.length === 0 && !result
+
+  const clearRunResult = React.useCallback(() => {
+    lastRunReceipt = {
+      result: null,
+      error: null,
+      context: null,
+    }
     setResult(null)
     setError(null)
-  }, [selectedMandate?.id, strategy])
+    setRunContext(null)
+  }, [])
 
   React.useEffect(() => {
     if (
@@ -378,13 +451,60 @@ export function AgentExecutionPanel() {
     }
   }, [selectedMandate, strategy])
 
+  const handleMandateChange = React.useCallback(
+    (value: string | null) => {
+      if (!value || value === selectedMandateId) {
+        return
+      }
+
+      setSelectedMandateId(value)
+      clearRunResult()
+    },
+    [clearRunResult, selectedMandateId]
+  )
+
+  const handleStrategyChange = React.useCallback(
+    (value: StrategyKey) => {
+      if (value === strategy) {
+        return
+      }
+
+      setStrategy(value)
+      clearRunResult()
+    },
+    [clearRunResult, strategy]
+  )
+
+  const scheduleRefresh = React.useCallback(() => {
+    window.setTimeout(() => {
+      refreshMandates()
+    }, 0)
+  }, [refreshMandates])
+
   const runAgent = async () => {
     if (!canRunAgent || !selectedMandate) {
       return
     }
 
+    const context: RunContext = {
+      mandateId: selectedMandate.id,
+      mandateLabel: selectedMandate.label,
+      agentAddress: selectedMandate.agentAddress,
+      amountSui: selectedAmountSui,
+      strategy,
+      remainingBudget,
+      txLimit: selectedMandate.txLimit,
+    }
+
     setIsRunning(true)
     setError(null)
+    setResult(null)
+    setRunContext(context)
+    lastRunReceipt = {
+      result: null,
+      error: null,
+      context,
+    }
 
     try {
       const response = await fetch("/api/agent/run", {
@@ -408,6 +528,11 @@ export function AgentExecutionPanel() {
       })
       const payload = (await response.json()) as AgentRunResult
       setResult(payload)
+      lastRunReceipt = {
+        result: payload,
+        error: null,
+        context,
+      }
 
       if (payload.status === "BLOCKED") {
         const reason = payload.blockedReason ?? "Move policy rejected the agent action"
@@ -418,12 +543,24 @@ export function AgentExecutionPanel() {
           reason,
         })
         setError(null)
-        refreshMandates()
+        scheduleRefresh()
         return
       }
 
       if (!response.ok || payload.status !== "SUCCESS") {
-        setError(normalizeAgentRunError(payload.error ?? "Agent execution failed"))
+        const normalizedError =
+          normalizeAgentRunError(
+            payload.error?.includes("old package")
+              ? OLD_PACKAGE_MANDATE_MESSAGE
+              : payload.error ?? "Agent execution failed"
+          )
+        setError(normalizedError)
+        lastRunReceipt = {
+          result: payload,
+          error: normalizedError,
+          context,
+        }
+        scheduleRefresh()
         return
       }
 
@@ -436,14 +573,29 @@ export function AgentExecutionPanel() {
         suiBalanceChange: parseSuiBalanceChange(payload.balanceChangeSui),
         gasFeeSui: parseSuiAmount(payload.gasFeeSui),
       })
-      refreshMandates()
+      scheduleRefresh()
     } catch (caught) {
-      setError(
+      const normalizedError =
         normalizeAgentRunError(
           caught instanceof Error ? caught.message : "Agent execution failed"
         )
-      )
-      setResult(null)
+      const failedResult: AgentRunResult = {
+        digest: "",
+        status: "FAILED",
+        activityEventFound: false,
+        deepBookPoolMutationFound: false,
+        balanceChangeSui: "0 SUI",
+        gasFeeSui: "-",
+        error: normalizedError,
+      }
+      setError(normalizedError)
+      setResult(failedResult)
+      lastRunReceipt = {
+        result: failedResult,
+        error: normalizedError,
+        context,
+      }
+      scheduleRefresh()
     } finally {
       setIsRunning(false)
     }
@@ -452,14 +604,23 @@ export function AgentExecutionPanel() {
   const status = result?.status
   const isSuccess = status === "SUCCESS"
   const isBlocked = status === "BLOCKED"
+  const resultContext = runContext ?? {
+    mandateId: selectedMandate?.id ?? "",
+    mandateLabel: selectedMandate?.label ?? "",
+    agentAddress: selectedMandate?.agentAddress,
+    amountSui: selectedAmountSui,
+    strategy,
+    remainingBudget,
+    txLimit: selectedMandate?.txLimit ?? 0,
+  }
 
   return (
     <Card className="border-primary/15 bg-card/80">
       <CardHeader className="border-b border-border">
         <CardTitle>Run Agent Strategy</CardTitle>
         <CardDescription>
-          Run the backend agent under a selected Mandate; reconnect Slush if the
-          owner wallet changed.
+          Backend agent signs and submits the selected Mandate strategy;
+          reconnect Slush if the owner wallet changed.
         </CardDescription>
         <CardAction>
           <Button
@@ -482,21 +643,23 @@ export function AgentExecutionPanel() {
           <h3 className="text-sm font-semibold text-foreground">
             Select Mandate
           </h3>
-          {loading ? (
+          {showMandateLoading ? (
             <div className="rounded-lg border border-border bg-background/60 p-3">
               <Skeleton className="h-9 w-full" />
             </div>
           ) : selectableMandates.length > 0 && (
             <div className="rounded-lg border border-border bg-background/60 p-3">
             <Select
-              value={selectedMandate?.id}
-              onValueChange={(value) => value && setSelectedMandateId(value)}
+              value={selectedMandateId ?? ""}
+              onValueChange={handleMandateChange}
             >
               <SelectTrigger className="h-auto w-full border-primary/20 bg-primary/5 py-2">
                 <span className="min-w-0 truncate text-left text-sm font-medium">
                   {selectedMandate
                     ? `${selectedMandate.label} (${shortId(selectedMandate.id)})`
-                    : "Select mandate"}
+                    : currentPackageActiveMandates.length === 0
+                      ? "No current-package active mandate"
+                      : "Select mandate"}
                 </span>
               </SelectTrigger>
               <SelectContent align="start" className="w-[min(560px,calc(100vw-2rem))]">
@@ -522,6 +685,7 @@ export function AgentExecutionPanel() {
                             <span className="font-mono">{shortId(mandate.id)}</span>
                             {" · "}
                             <span className="capitalize">{mandate.status}</span>
+                            {!belongsToCurrentPackage(mandate) && " · old package"}
                             {" · "}Budget {formatSui(mandate.budget)}
                             {" · "}Max {formatSui(mandate.txLimit)}
                             {" · "}Created {mandate.createdAtDisplay ?? "-"}
@@ -537,7 +701,7 @@ export function AgentExecutionPanel() {
             </div>
           )}
 
-          {loading ? (
+          {showMandateLoading ? (
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
               {Array.from({ length: 6 }).map((_, index) => (
                 <Skeleton key={index} className="h-[58px] rounded-lg" />
@@ -569,6 +733,12 @@ export function AgentExecutionPanel() {
               for the verified backend agent.
             </div>
           )}
+
+          {selectedMandate && !packageAllowed && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {OLD_PACKAGE_MANDATE_MESSAGE}
+            </div>
+          )}
         </section>
 
         <section className="flex flex-col gap-3">
@@ -586,12 +756,12 @@ export function AgentExecutionPanel() {
               <button
                 key={key}
                 type="button"
-                onClick={() => !disabled && setStrategy(value)}
+                onClick={() => !disabled && handleStrategyChange(value)}
                 disabled={disabled}
                 className={cn(
-                  "flex min-h-[132px] flex-col items-start gap-3 rounded-lg border bg-background/60 p-3 text-left transition",
+                  "flex min-h-[124px] flex-col items-start gap-2.5 rounded-lg border bg-background/60 p-3 text-left transition",
                   "hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
-                  disabled && "cursor-not-allowed opacity-45 hover:border-border hover:bg-background/60",
+                  disabled && "cursor-not-allowed opacity-55 hover:border-border hover:bg-background/60",
                   selected
                     ? "border-cyan-400/50 bg-cyan-400/10 shadow-[0_0_24px_rgba(34,211,238,0.08)]"
                     : "border-border"
@@ -614,7 +784,7 @@ export function AgentExecutionPanel() {
                     Expected: {option.expectation}
                   </Badge>
                 </div>
-                <span className="text-sm leading-snug text-muted-foreground">
+                <span className="text-xs leading-snug text-muted-foreground">
                   {option.description}
                 </span>
                 <span className="mt-auto font-mono text-xs text-muted-foreground">
@@ -638,37 +808,22 @@ export function AgentExecutionPanel() {
         )}
 
         <section className="flex flex-col gap-3">
-          <h3 className="text-sm font-semibold text-foreground">
-            Execution Result
-          </h3>
+          <div className="flex items-center gap-4">
+            <h3 className="text-sm font-semibold text-foreground">
+              Execution Result
+            </h3>
+            {result && <ResultStatusBadge status={result.status} />}
+          </div>
           {result ? (
             <>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <ResultField
-                  label="Status"
-                  value={
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "font-medium",
-                        isSuccess
-                          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
-                          : isBlocked
-                            ? "border-amber-500/25 bg-amber-500/10 text-amber-400"
-                            : "border-destructive/30 bg-destructive/10 text-destructive"
-                      )}
-                    >
-                      {result.status}
-                    </Badge>
-                  }
-                />
-                <ResultField
                   label="Strategy"
-                  value={STRATEGIES[strategy].label}
+                  value={STRATEGIES[resultContext.strategy].label}
                 />
                 <ResultField
                   label="Input amount"
-                  value={formatSui(selectedAmountSui)}
+                  value={formatSui(resultContext.amountSui)}
                   mono
                 />
                 <ResultField
@@ -685,14 +840,33 @@ export function AgentExecutionPanel() {
                   }
                   mono
                 />
+                <ResultField
+                  label="Gas Fee"
+                  value={result.gasFeeSui || "-"}
+                  mono
+                />
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <ResultField
+                  label="Agent Wallet"
+                  value={
+                    resultContext.agentAddress ? (
+                      <CopyableId
+                        value={resultContext.agentAddress}
+                        label="agent wallet"
+                      />
+                    ) : (
+                      "-"
+                    )
+                  }
+                  mono={Boolean(resultContext.agentAddress)}
+                />
+                <ResultField
                   label="Mandate ID"
                   value={
-                    selectedMandate ? (
-                      <CopyableId value={selectedMandate.id} label="mandate id" />
+                    resultContext.mandateId ? (
+                      <CopyableId value={resultContext.mandateId} label="mandate id" />
                     ) : (
                       "-"
                     )
@@ -724,11 +898,6 @@ export function AgentExecutionPanel() {
                   }
                   mono={result.deepBookPoolMutationFound}
                 />
-                <ResultField
-                  label="Gas Fee"
-                  value={result.gasFeeSui || "-"}
-                  mono
-                />
               </div>
 
               {isSuccess ? (
@@ -736,8 +905,8 @@ export function AgentExecutionPanel() {
                   <CheckCircle2 className="size-4 text-primary" />
                   <AlertTitle>Agent execution completed</AlertTitle>
                   <AlertDescription>
-                    Mandate authorization and DeepBook swap result were returned
-                    by the server-side wrapper.
+                    The backend agent signed and submitted the DeepBook swap
+                    through the selected Mandate policy.
                   </AlertDescription>
                 </Alert>
               ) : isBlocked ? (
@@ -753,19 +922,19 @@ export function AgentExecutionPanel() {
                     <span>
                       Attempted amount:{" "}
                       <span className="font-mono text-foreground">
-                        {formatSui(selectedAmountSui)}
+                        {formatSui(resultContext.amountSui)}
                       </span>
                     </span>
                     <span>
                       Remaining budget:{" "}
                       <span className="font-mono text-foreground">
-                        {formatSui(remainingBudget)}
+                        {formatSui(resultContext.remainingBudget)}
                       </span>
                     </span>
                     <span>
                       Max single tx:{" "}
                       <span className="font-mono text-foreground">
-                        {selectedMandate ? formatSui(selectedMandate.txLimit) : "-"}
+                        {formatSui(resultContext.txLimit)}
                       </span>
                     </span>
                     <span>
@@ -788,10 +957,10 @@ export function AgentExecutionPanel() {
                     <span className="block">
                       {error ?? result.error ?? "No failure reason returned."}
                     </span>
-                    {selectedMandate && (
+                    {resultContext.mandateId && (
                       <span className="block">
                         Selected mandate{" "}
-                        <CopyableId value={selectedMandate.id} label="mandate id" />
+                        <CopyableId value={resultContext.mandateId} label="mandate id" />
                       </span>
                     )}
                     {!isPackageVersionMismatch(error ?? result.error) && (
@@ -813,10 +982,10 @@ export function AgentExecutionPanel() {
             <AlertTitle>Error running agent</AlertTitle>
             <AlertDescription className="space-y-2">
               <span className="block">{error}</span>
-              {selectedMandate && (
+              {resultContext.mandateId && (
                 <span className="block">
                   Selected mandate{" "}
-                  <CopyableId value={selectedMandate.id} label="mandate id" />
+                  <CopyableId value={resultContext.mandateId} label="mandate id" />
                 </span>
               )}
               {!isPackageVersionMismatch(error) && (

@@ -12,6 +12,8 @@ const NORMALIZED_SUI_TYPE =
   '0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI';
 const MIST_PER_SUI = 1_000_000_000n;
 const DEEP_SUI_POOL_ID = '0x48c95963e9eac37a316b7ae04a0deb761bcdcc2b67912374d6036e7f0e9bae9f';
+const OLD_PACKAGE_ERROR =
+  'Selected mandate belongs to an old package. Create a new mandate with the current package.';
 
 type TransactionLike = {
   digest?: string;
@@ -52,6 +54,65 @@ function requireSuiAddressEnv(name: string): string {
     throw new Error(`${name} must be a valid Sui object/address id, got: ${value}`);
   }
   return value;
+}
+
+function normalizeSuiAddress(value: string): string {
+  const raw = value.trim().toLowerCase();
+  const withoutPrefix = raw.startsWith('0x') ? raw.slice(2) : raw;
+  const normalized = withoutPrefix.replace(/^0+/, '') || '0';
+  return `0x${normalized}`;
+}
+
+function packageFromObjectType(objectType: string | undefined): string {
+  return objectType?.split('::')[0] ?? '';
+}
+
+function isCurrentMandateObjectType(objectType: string | undefined, packageId: string): boolean {
+  return (
+    Boolean(objectType?.endsWith('::mandate::Mandate')) &&
+    normalizeSuiAddress(packageFromObjectType(objectType)) === normalizeSuiAddress(packageId)
+  );
+}
+
+async function fetchMandateObjectType(mandateId: string): Promise<string | undefined> {
+  const response = await fetch('https://fullnode.testnet.sui.io:443', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'sui_getObject',
+      params: [
+        mandateId,
+        {
+          showContent: true,
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Unable to fetch mandate object type: HTTP ${response.status}`);
+  }
+
+  const payload = (await response.json()) as {
+    error?: { message?: string };
+    result?: {
+      data?: {
+        content?: {
+          dataType?: string;
+          type?: string;
+        };
+      };
+    };
+  };
+
+  if (payload.error) {
+    throw new Error(payload.error.message ?? 'Unable to fetch mandate object type');
+  }
+
+  const content = payload.result?.data?.content;
+  return content?.dataType === 'moveObject' ? content.type : undefined;
 }
 
 function parseSuiToMist(value: string): bigint {
@@ -186,6 +247,7 @@ async function main() {
 
   const poolKey = process.env.POOL_KEY ?? 'DEEP_SUI';
   const amountSui = process.env.AMOUNT_SUI ?? '0.001';
+  const strategy = process.env.STRATEGY ?? 'normal';
   const minOut = Number(process.env.MIN_OUT ?? '0');
   const deepAmount = Number(process.env.DEEP_AMOUNT ?? '0');
   const amountMist = parseSuiToMist(amountSui);
@@ -197,6 +259,23 @@ async function main() {
 
   const keypair = Ed25519Keypair.fromSecretKey(secretKey);
   const agentAddress = keypair.toSuiAddress();
+  const mandateObjectType = await fetchMandateObjectType(mandateId);
+
+  console.log('[MANDATE] agent execution preflight');
+  console.log(`[MANDATE] package id: ${packageId}`);
+  console.log(`[MANDATE] mandate id: ${mandateId}`);
+  console.log(`[MANDATE] mandate objectType: ${mandateObjectType ?? 'unknown'}`);
+  console.log(`[MANDATE] agent wallet address: ${agentAddress}`);
+  console.log(`[MANDATE] selected strategy: ${strategy}`);
+
+  if (!isCurrentMandateObjectType(mandateObjectType, packageId)) {
+    throw new Error(
+      `${OLD_PACKAGE_ERROR} Expected ${packageId}::mandate::Mandate, got ${
+        mandateObjectType ?? 'unknown object type'
+      }.`,
+    );
+  }
+
   const client = new SuiGrpcClient({
     network: 'testnet',
     baseUrl: 'https://fullnode.testnet.sui.io:443',
