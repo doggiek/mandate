@@ -168,6 +168,20 @@ function runtimeBackendAgentAddress(repoRoot: string) {
   )
 }
 
+function runtimeDeepBookPoolId(repoRoot: string) {
+  const poolId =
+    runtimeEnvValue("NEXT_PUBLIC_DEEPBOOK_POOL_ID", repoRoot) ??
+    runtimeEnvValue("DEEPBOOK_POOL_ID", repoRoot)
+
+  if (!poolId) {
+    throw new Error(
+      "DeepBook swap unavailable; fallback transfer disabled. Missing NEXT_PUBLIC_DEEPBOOK_POOL_ID."
+    )
+  }
+
+  return poolId
+}
+
 function assertBackendAgentMatchesSigner(
   expectedAgentAddress: string,
   agentPrivateKey: string
@@ -370,11 +384,13 @@ export async function POST(request: Request) {
   let packageId: string
   let agentPrivateKey: string
   let backendAgentAddress: string
+  let deepBookPoolId: string
 
   try {
     packageId = runtimePackageId(repoRoot)
     agentPrivateKey = runtimeAgentPrivateKey(repoRoot)
     backendAgentAddress = runtimeBackendAgentAddress(repoRoot)
+    deepBookPoolId = runtimeDeepBookPoolId(repoRoot)
     assertBackendAgentMatchesSigner(backendAgentAddress, agentPrivateKey)
   } catch (caught) {
     const error = caught instanceof Error ? caught.message : String(caught)
@@ -412,6 +428,8 @@ export async function POST(request: Request) {
           NEXT_PUBLIC_BACKEND_AGENT_ADDRESS: backendAgentAddress,
           MANDATE_ID: mandateId,
           POOL_KEY: DEEPBOOK_POOL_KEY,
+          DEEPBOOK_POOL_ID: deepBookPoolId,
+          NEXT_PUBLIC_DEEPBOOK_POOL_ID: deepBookPoolId,
           AMOUNT_SUI: amountSui,
           STRATEGY: requestStrategy(body),
           ...(blockedReason ? { BLOCK_REASON: blockedReason } : {}),

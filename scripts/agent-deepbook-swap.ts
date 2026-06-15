@@ -11,7 +11,6 @@ const SUI_TYPE = '0x2::sui::SUI';
 const NORMALIZED_SUI_TYPE =
   '0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI';
 const MIST_PER_SUI = 1_000_000_000n;
-const DEEP_SUI_POOL_ID = '0x48c95963e9eac37a316b7ae04a0deb761bcdcc2b67912374d6036e7f0e9bae9f';
 const DEFAULT_BACKEND_AGENT_ADDRESS =
   '0x91dc52b575b3cd5703be07ee65e12b5af3a25d927b16fa8f94811b7b773ad8b2';
 const OLD_PACKAGE_ERROR =
@@ -164,12 +163,10 @@ function hasMandateActivityEvent(events: TransactionLike['events'], packageId: s
   return (events ?? []).some((event) => event.eventType === `${packageId}::mandate::ActivityEvent`);
 }
 
-function hasDeepBookPoolMutation(effects: TransactionLike['effects'], poolKey: string): boolean {
-  const expectedPoolId = poolKey === 'DEEP_SUI' ? DEEP_SUI_POOL_ID : undefined;
-  if (!expectedPoolId) {
-    return false;
-  }
-
+function hasDeepBookPoolMutation(
+  effects: TransactionLike['effects'],
+  expectedPoolId: string,
+): boolean {
   const changedObjects = effects?.changedObjects ?? effects?.changed_objects ?? [];
   return changedObjects.some((object) => {
     const objectId = object.objectId ?? object.object_id;
@@ -267,11 +264,24 @@ async function main() {
   const mandateId = requireSuiAddressEnv('MANDATE_ID');
 
   const poolKey = process.env.POOL_KEY ?? 'DEEP_SUI';
+  const poolId =
+    process.env.DEEPBOOK_POOL_ID ?? process.env.NEXT_PUBLIC_DEEPBOOK_POOL_ID;
   const amountSui = process.env.AMOUNT_SUI ?? '0.001';
   const strategy = process.env.STRATEGY ?? 'normal';
   const minOut = Number(process.env.MIN_OUT ?? '0');
   const deepAmount = Number(process.env.DEEP_AMOUNT ?? '0');
   const amountMist = parseSuiToMist(amountSui);
+
+  if (poolKey !== 'DEEP_SUI') {
+    throw new Error(
+      `DeepBook swap unavailable; fallback transfer disabled. Unsupported POOL_KEY ${poolKey}.`,
+    );
+  }
+  if (!poolId || !isValidSuiAddress(poolId)) {
+    throw new Error(
+      'DeepBook swap unavailable; fallback transfer disabled. Missing NEXT_PUBLIC_DEEPBOOK_POOL_ID / DEEPBOOK_POOL_ID.',
+    );
+  }
 
   const { secretKey, scheme } = decodeSuiPrivateKey(agentPrivateKey);
   if (scheme !== 'ED25519') {
@@ -300,6 +310,8 @@ async function main() {
   console.log(`[MANDATE] mandate owner: ${mandateOwner ?? 'unknown'}`);
   console.log(`[MANDATE] agent wallet address: ${agentAddress}`);
   console.log(`[MANDATE] selected strategy: ${strategy}`);
+  console.log(`[MANDATE] DeepBook pool key: ${poolKey}`);
+  console.log(`[MANDATE] DeepBook pool id: ${poolId}`);
 
   if (!isCurrentMandateObjectType(mandateObjectType, packageId)) {
     throw new Error(
@@ -378,7 +390,7 @@ async function main() {
 
   const success = confirmed.status?.success === true;
   const activityEventFound = hasMandateActivityEvent(confirmed.events, packageId);
-  const deepBookPoolMutated = hasDeepBookPoolMutation(confirmed.effects, poolKey);
+  const deepBookPoolMutated = hasDeepBookPoolMutation(confirmed.effects, poolId);
 
   printDemoSummary({
     digest: confirmed.digest,
