@@ -47,6 +47,7 @@ type AgentRunResult = {
   deepBookPoolMutationFound: boolean
   balanceChangeSui: string
   gasFeeSui: string
+  timestampMs?: number
   blockedReason?: string
   error?: string
 }
@@ -72,6 +73,9 @@ type LastRunReceipt = {
   error: string | null
   context: RunContext | null
 }
+
+type AutoRunStatus = "off" | "running" | "stopped" | "error"
+type AutoRunInterval = "off" | "30000" | "60000" | "300000"
 
 let lastRunReceipt: LastRunReceipt = {
   result: null,
@@ -110,11 +114,21 @@ const STRATEGIES: Record<
 }
 
 const AGENT_MISMATCH_MESSAGE =
-  "Agent wallet mismatch. The selected mandate must authorize the backend agent wallet."
+  "Agent wallet mismatch. The selected mandate must authorize the backend Trading Agent wallet."
 const PACKAGE_VERSION_MISMATCH_MESSAGE =
   "Blocked event requires the latest Mandate package. Update PACKAGE_ID after publishing the upgraded contract."
 const OLD_PACKAGE_MANDATE_MESSAGE =
   "Selected mandate belongs to an old package. Create a new mandate with the current package."
+
+const AUTO_RUN_INTERVALS: Array<{
+  label: string
+  value: AutoRunInterval
+}> = [
+  { label: "Off", value: "off" },
+  { label: "30s", value: "30000" },
+  { label: "1m", value: "60000" },
+  { label: "5m", value: "300000" },
+]
 
 function ResultField({
   label,
@@ -309,6 +323,53 @@ function mandateStatusDot(status: "active" | "expired" | "revoked") {
   return "bg-muted-foreground"
 }
 
+function autoRunStatusLabel(status: AutoRunStatus) {
+  if (status === "off") {
+    return "Off"
+  }
+  if (status === "running") {
+    return "Running"
+  }
+  if (status === "error") {
+    return "Error"
+  }
+  return "Stopped"
+}
+
+function autoRunStatusClass(status: AutoRunStatus) {
+  if (status === "running") {
+    return "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
+  }
+  if (status === "error") {
+    return "border-destructive/30 bg-destructive/10 text-destructive"
+  }
+  if (status === "stopped") {
+    return "border-amber-500/25 bg-amber-500/10 text-amber-400"
+  }
+  return "border-border bg-background/60 text-muted-foreground"
+}
+
+function formatAutoRunTime(timestampMs?: number | null) {
+  if (!timestampMs) {
+    return "-"
+  }
+
+  return new Date(timestampMs).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  })
+}
+
+function formatCountdown(nextRunAt: number | null, nowMs: number) {
+  if (!nextRunAt) {
+    return "-"
+  }
+
+  const seconds = Math.max(0, Math.ceil((nextRunAt - nowMs) / 1000))
+  return `in ${seconds}s`
+}
+
 export function AgentExecutionPanel() {
   const {
     mandates,
@@ -326,11 +387,43 @@ export function AgentExecutionPanel() {
     null
   )
   const [runContext, setRunContext] = React.useState<RunContext | null>(null)
+  const [autoStrategy, setAutoStrategy] = React.useState<StrategyKey>("normal")
+  const [autoInterval, setAutoInterval] =
+    React.useState<AutoRunInterval>("off")
+  const [autoStatus, setAutoStatus] = React.useState<AutoRunStatus>("off")
+  const [autoMessage, setAutoMessage] = React.useState<string | null>(null)
+  const [autoRunCount, setAutoRunCount] = React.useState(0)
+  const [autoLastDigest, setAutoLastDigest] = React.useState<string | null>(null)
+  const [autoLastRunTime, setAutoLastRunTime] = React.useState<number | null>(null)
+  const [autoNextRunAt, setAutoNextRunAt] = React.useState<number | null>(null)
+  const [nowMs, setNowMs] = React.useState(() => Date.now())
+  const autoTimerRef = React.useRef<number | null>(null)
+  const autoInFlightRef = React.useRef(false)
 
   React.useEffect(() => {
     setResult(lastRunReceipt.result)
     setError(lastRunReceipt.error)
     setRunContext(lastRunReceipt.context)
+  }, [])
+
+  React.useEffect(() => {
+    if (autoStatus !== "running") {
+      return
+    }
+
+    const timer = window.setInterval(() => {
+      setNowMs(Date.now())
+    }, 1000)
+
+    return () => window.clearInterval(timer)
+  }, [autoStatus])
+
+  React.useEffect(() => {
+    return () => {
+      if (autoTimerRef.current) {
+        window.clearTimeout(autoTimerRef.current)
+      }
+    }
   }, [])
 
   const selectableMandates = React.useMemo(() => {
@@ -423,12 +516,67 @@ export function AgentExecutionPanel() {
   const remainingBudget = selectedMandate
     ? Math.max(selectedMandate.budget - selectedMandate.spent, 0)
     : 0
-  const canRunAgent =
-    Boolean(selectedMandate) &&
-    packageAllowed &&
-    agentWalletMatches &&
-    protocolAllowed &&
-    !isStrategyDisabled(strategy, selectedMandate)
+  const validateRunStrategy = React.useCallback(
+    (runStrategy: StrategyKey) => {
+      if (!selectedMandate) {
+        return {
+          ok: false,
+          reason: "Create an active mandate before running the agent.",
+        }
+      }
+
+      if (!packageAllowed) {
+        return {
+          ok: false,
+          reason: OLD_PACKAGE_MANDATE_MESSAGE,
+        }
+      }
+
+      if (!agentWalletMatches) {
+        return {
+          ok: false,
+          reason:
+            "Selected Mandate must authorize the backend Trading Agent wallet.",
+        }
+      }
+
+      if (!protocolAllowed) {
+        return {
+          ok: false,
+          reason: "Selected Mandate must be scoped to DeepBook.",
+        }
+      }
+
+      if (isStrategyDisabled(runStrategy, selectedMandate)) {
+        return {
+          ok: false,
+          reason:
+            selectedMandate.status === "active"
+              ? "Inactive guard only applies to revoked or expired mandates."
+              : "Only the inactive guard can run against revoked or expired mandates.",
+        }
+      }
+
+      const amountSui = strategyAmount(runStrategy, selectedMandate)
+      const remainingSui = Math.max(selectedMandate.budget - selectedMandate.spent, 0)
+
+      if (runStrategy === "normal" && amountSui > remainingSui) {
+        return {
+          ok: false,
+          reason: "Mandate budget is insufficient for the selected strategy.",
+        }
+      }
+
+      return {
+        ok: true,
+        reason: null,
+      }
+    },
+    [agentWalletMatches, packageAllowed, protocolAllowed, selectedMandate]
+  )
+  const canRunAgent = validateRunStrategy(strategy).ok
+  const canStartAutoRun =
+    autoInterval !== "off" && validateRunStrategy(autoStrategy).ok
   const showMandateLoading = loading && selectableMandates.length === 0 && !result
 
   const clearRunResult = React.useCallback(() => {
@@ -451,16 +599,55 @@ export function AgentExecutionPanel() {
     }
   }, [selectedMandate, strategy])
 
+  React.useEffect(() => {
+    if (
+      selectedMandate &&
+      isStrategyDisabled(autoStrategy, selectedMandate)
+    ) {
+      setAutoStrategy(
+        selectedMandate.status === "active" ? "normal" : "revoked_expired"
+      )
+    }
+  }, [autoStrategy, selectedMandate])
+
+  const stopAutoRun = React.useCallback(
+    (status: AutoRunStatus = "stopped", message?: string) => {
+      if (autoTimerRef.current) {
+        window.clearTimeout(autoTimerRef.current)
+        autoTimerRef.current = null
+      }
+      autoInFlightRef.current = false
+      setAutoStatus(status)
+      setAutoNextRunAt(null)
+      setAutoMessage(message ?? null)
+    },
+    []
+  )
+
+  React.useEffect(() => {
+    if (autoStatus !== "running") {
+      return
+    }
+
+    const validation = validateRunStrategy(autoStrategy)
+    if (!validation.ok) {
+      stopAutoRun("error", validation.reason ?? "Auto Run stopped.")
+    }
+  }, [autoStatus, autoStrategy, stopAutoRun, validateRunStrategy])
+
   const handleMandateChange = React.useCallback(
     (value: string | null) => {
       if (!value || value === selectedMandateId) {
         return
       }
 
+      if (autoStatus === "running") {
+        stopAutoRun("stopped", "Auto Run stopped after mandate change.")
+      }
       setSelectedMandateId(value)
       clearRunResult()
     },
-    [clearRunResult, selectedMandateId]
+    [autoStatus, clearRunResult, selectedMandateId, stopAutoRun]
   )
 
   const handleStrategyChange = React.useCallback(
@@ -481,125 +668,269 @@ export function AgentExecutionPanel() {
     }, 0)
   }, [refreshMandates])
 
-  const runAgent = async () => {
-    if (!canRunAgent || !selectedMandate) {
-      return
-    }
+  const executeAgentRun = React.useCallback(
+    async (runStrategy: StrategyKey) => {
+      if (!selectedMandate) {
+        return {
+          result: null,
+          error: "Create an active mandate before running the agent.",
+        }
+      }
 
-    const context: RunContext = {
-      mandateId: selectedMandate.id,
-      mandateLabel: selectedMandate.label,
-      agentAddress: selectedMandate.agentAddress,
-      amountSui: selectedAmountSui,
-      strategy,
-      remainingBudget,
-      txLimit: selectedMandate.txLimit,
-    }
+      const validation = validateRunStrategy(runStrategy)
+      const amountSui = strategyAmount(runStrategy, selectedMandate)
+      const context: RunContext = {
+        mandateId: selectedMandate.id,
+        mandateLabel: selectedMandate.label,
+        agentAddress: selectedMandate.agentAddress,
+        amountSui,
+        strategy: runStrategy,
+        remainingBudget,
+        txLimit: selectedMandate.txLimit,
+      }
 
-    setIsRunning(true)
-    setError(null)
-    setResult(null)
-    setRunContext(context)
-    lastRunReceipt = {
-      result: null,
-      error: null,
-      context,
-    }
-
-    try {
-      const response = await fetch("/api/agent/run", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          mandateId: selectedMandate.id,
-          strategy,
-          amountSui: selectedAmountSui,
-          mandateMetadata: {
-            budgetSui: selectedMandate.budget,
-            spentSui: selectedMandate.spent,
-            remainingSui: remainingBudget,
-            maxSingleTxSui: selectedMandate.txLimit,
-            protocol: selectedProtocol,
-            status: selectedMandate.status,
-          },
-        }),
-      })
-      const payload = (await response.json()) as AgentRunResult
-      setResult(payload)
+      setIsRunning(true)
+      setError(null)
+      setResult(null)
+      setRunContext(context)
       lastRunReceipt = {
-        result: payload,
+        result: null,
         error: null,
         context,
       }
 
-      if (payload.status === "BLOCKED") {
-        const reason = payload.blockedReason ?? "Move policy rejected the agent action"
-        recordBlockedAction({
-          mandateId: selectedMandate.id,
-          digest: payload.digest,
-          amountSui: selectedAmountSui,
-          reason,
-        })
-        setError(null)
-        scheduleRefresh()
-        return
+      if (!validation.ok) {
+        const failedResult: AgentRunResult = {
+          digest: "",
+          status: "FAILED",
+          activityEventFound: false,
+          deepBookPoolMutationFound: false,
+          balanceChangeSui: "0 SUI",
+          gasFeeSui: "-",
+          error: validation.reason ?? "Agent execution failed",
+        }
+        setError(failedResult.error ?? null)
+        setResult(failedResult)
+        lastRunReceipt = {
+          result: failedResult,
+          error: failedResult.error ?? null,
+          context,
+        }
+        setIsRunning(false)
+        return {
+          result: failedResult,
+          error: failedResult.error ?? null,
+        }
       }
 
-      if (!response.ok || payload.status !== "SUCCESS") {
-        const normalizedError =
-          normalizeAgentRunError(
-            payload.error?.includes("old package")
-              ? OLD_PACKAGE_MANDATE_MESSAGE
-              : payload.error ?? "Agent execution failed"
-          )
-        setError(normalizedError)
+      try {
+        const response = await fetch("/api/agent/run", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            mandateId: selectedMandate.id,
+            strategy: runStrategy,
+            amountSui,
+            mandateMetadata: {
+              budgetSui: selectedMandate.budget,
+              spentSui: selectedMandate.spent,
+              remainingSui: remainingBudget,
+              maxSingleTxSui: selectedMandate.txLimit,
+              protocol: selectedProtocol,
+              status: selectedMandate.status,
+            },
+          }),
+        })
+        const payload = (await response.json()) as AgentRunResult
+        setResult(payload)
         lastRunReceipt = {
           result: payload,
+          error: null,
+          context,
+        }
+
+        if (payload.status === "BLOCKED") {
+          const reason =
+            payload.blockedReason ?? "Move policy rejected the agent action"
+          recordBlockedAction({
+            mandateId: selectedMandate.id,
+            digest: payload.digest,
+            amountSui,
+            reason,
+          })
+          setError(null)
+          scheduleRefresh()
+          return {
+            result: payload,
+            error: null,
+          }
+        }
+
+        if (!response.ok || payload.status !== "SUCCESS") {
+          const normalizedError =
+            normalizeAgentRunError(
+              payload.error?.includes("old package")
+                ? OLD_PACKAGE_MANDATE_MESSAGE
+                : payload.error ?? "Agent execution failed"
+            )
+          setError(normalizedError)
+          lastRunReceipt = {
+            result: payload,
+            error: normalizedError,
+            context,
+          }
+          scheduleRefresh()
+          return {
+            result: payload,
+            error: normalizedError,
+          }
+        }
+
+        recordAgentExecution({
+          mandateId: selectedMandate.id,
+          digest: payload.digest,
+          pair: DEEPBOOK_POOL_KEY,
+          side: "Buy",
+          amountSui,
+          suiBalanceChange: parseSuiBalanceChange(payload.balanceChangeSui),
+          gasFeeSui: parseSuiAmount(payload.gasFeeSui),
+        })
+        scheduleRefresh()
+        return {
+          result: payload,
+          error: null,
+        }
+      } catch (caught) {
+        const normalizedError =
+          normalizeAgentRunError(
+            caught instanceof Error ? caught.message : "Agent execution failed"
+          )
+        const failedResult: AgentRunResult = {
+          digest: "",
+          status: "FAILED",
+          activityEventFound: false,
+          deepBookPoolMutationFound: false,
+          balanceChangeSui: "0 SUI",
+          gasFeeSui: "-",
+          error: normalizedError,
+        }
+        setError(normalizedError)
+        setResult(failedResult)
+        lastRunReceipt = {
+          result: failedResult,
           error: normalizedError,
           context,
         }
         scheduleRefresh()
-        return
+        return {
+          result: failedResult,
+          error: normalizedError,
+        }
+      } finally {
+        setIsRunning(false)
       }
+    },
+    [
+      recordAgentExecution,
+      recordBlockedAction,
+      remainingBudget,
+      scheduleRefresh,
+      selectedMandate,
+      selectedProtocol,
+      validateRunStrategy,
+    ]
+  )
 
-      recordAgentExecution({
-        mandateId: selectedMandate.id,
-        digest: payload.digest,
-        pair: DEEPBOOK_POOL_KEY,
-        side: "Buy",
-        amountSui: selectedAmountSui,
-        suiBalanceChange: parseSuiBalanceChange(payload.balanceChangeSui),
-        gasFeeSui: parseSuiAmount(payload.gasFeeSui),
-      })
-      scheduleRefresh()
-    } catch (caught) {
-      const normalizedError =
-        normalizeAgentRunError(
-          caught instanceof Error ? caught.message : "Agent execution failed"
-        )
-      const failedResult: AgentRunResult = {
-        digest: "",
-        status: "FAILED",
-        activityEventFound: false,
-        deepBookPoolMutationFound: false,
-        balanceChangeSui: "0 SUI",
-        gasFeeSui: "-",
-        error: normalizedError,
-      }
-      setError(normalizedError)
-      setResult(failedResult)
-      lastRunReceipt = {
-        result: failedResult,
-        error: normalizedError,
-        context,
-      }
-      scheduleRefresh()
-    } finally {
-      setIsRunning(false)
+  const runAgent = React.useCallback(() => {
+    void executeAgentRun(strategy)
+  }, [executeAgentRun, strategy])
+
+  const runAutoOnce = React.useCallback(async () => {
+    if (autoInFlightRef.current) {
+      return
     }
-  }
+
+    const validation = validateRunStrategy(autoStrategy)
+    if (!validation.ok) {
+      stopAutoRun("error", validation.reason ?? "Auto Run stopped.")
+      return
+    }
+
+    autoInFlightRef.current = true
+    const outcome = await executeAgentRun(autoStrategy)
+    autoInFlightRef.current = false
+
+    if (outcome.result?.digest) {
+      setAutoLastDigest(outcome.result.digest)
+    }
+    setAutoLastRunTime(outcome.result?.timestampMs ?? null)
+
+    if (outcome.result?.status === "SUCCESS") {
+      setAutoRunCount((count) => count + 1)
+      setAutoMessage(null)
+      return
+    }
+
+    if (outcome.result?.status === "BLOCKED") {
+      setAutoRunCount((count) => count + 1)
+      stopAutoRun(
+        "stopped",
+        "Policy block recorded on-chain. Auto Run stopped before another DeepBook submission."
+      )
+      return
+    }
+
+    stopAutoRun("error", outcome.error ?? "Auto Run failed.")
+  }, [autoStrategy, executeAgentRun, stopAutoRun, validateRunStrategy])
+
+  const startAutoRun = React.useCallback(() => {
+    const validation = validateRunStrategy(autoStrategy)
+    if (autoInterval === "off") {
+      setAutoStatus("error")
+      setAutoMessage("Choose an interval before starting Auto Run.")
+      return
+    }
+    if (!validation.ok) {
+      setAutoStatus("error")
+      setAutoMessage(validation.reason ?? "Auto Run cannot start.")
+      return
+    }
+
+    setAutoStatus("running")
+    setAutoMessage(null)
+    setAutoRunCount(0)
+    setAutoLastDigest(null)
+    setAutoLastRunTime(null)
+    setAutoNextRunAt(null)
+    void runAutoOnce()
+  }, [autoInterval, autoStrategy, runAutoOnce, validateRunStrategy])
+
+  React.useEffect(() => {
+    if (autoStatus !== "running" || autoInterval === "off") {
+      return
+    }
+
+    if (autoTimerRef.current) {
+      window.clearTimeout(autoTimerRef.current)
+    }
+
+    const intervalMs = Number(autoInterval)
+    const nextRunAt = Date.now() + intervalMs
+    setAutoNextRunAt(nextRunAt)
+
+    autoTimerRef.current = window.setTimeout(() => {
+      void runAutoOnce()
+    }, intervalMs)
+
+    return () => {
+      if (autoTimerRef.current) {
+        window.clearTimeout(autoTimerRef.current)
+        autoTimerRef.current = null
+      }
+    }
+  }, [autoInterval, autoRunCount, autoStatus, runAutoOnce])
 
   const status = result?.status
   const isSuccess = status === "SUCCESS"
@@ -613,19 +944,22 @@ export function AgentExecutionPanel() {
     remainingBudget,
     txLimit: selectedMandate?.txLimit ?? 0,
   }
+  const autoRunValidation = validateRunStrategy(autoStrategy)
+  const selectedAutoIntervalLabel =
+    AUTO_RUN_INTERVALS.find((option) => option.value === autoInterval)?.label ??
+    "Off"
 
   return (
     <Card className="border-primary/15 bg-card/80">
       <CardHeader className="border-b border-border">
         <CardTitle>Run Agent Strategy</CardTitle>
         <CardDescription>
-          Backend agent signs and submits the selected Mandate strategy;
-          reconnect Slush if the owner wallet changed.
+          Manual or scheduled backend execution under the selected Mandate policy.
         </CardDescription>
         <CardAction>
           <Button
             onClick={runAgent}
-            disabled={isRunning || !canRunAgent}
+            disabled={isRunning || autoStatus === "running" || !canRunAgent}
             className="bg-primary text-primary-foreground hover:bg-primary/90"
           >
             {isRunning ? (
@@ -639,6 +973,10 @@ export function AgentExecutionPanel() {
       </CardHeader>
       <CardContent className="flex flex-col gap-4 p-4">
         {/* Natural language planning is out of scope for MVP; this panel executes a predefined DeepBook strategy. */}
+        <p className="text-xs text-muted-foreground">
+          Owner signs only to create or revoke a Mandate; execution is submitted
+          by the backend Trading Agent within the on-chain policy limits.
+        </p>
         <section className="flex flex-col gap-3">
           <h3 className="text-sm font-semibold text-foreground">
             Select Mandate
@@ -730,7 +1068,7 @@ export function AgentExecutionPanel() {
           {selectedMandate && !agentWalletMatches && (
             <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
               This mandate authorizes a different agent wallet. Create a mandate
-              for the verified backend agent.
+              for the backend Trading Agent.
             </div>
           )}
 
@@ -806,6 +1144,170 @@ export function AgentExecutionPanel() {
             </AlertDescription>
           </Alert>
         )}
+
+        <section className="flex flex-col gap-3 rounded-lg border border-border bg-background/45 p-3">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Auto Run</h3>
+              <p className="text-xs text-muted-foreground">
+                Let the backend Trading Agent run this strategy on an interval
+                while the Mandate remains active.
+              </p>
+            </div>
+            <Badge
+              variant="outline"
+              className={cn("w-fit font-medium", autoRunStatusClass(autoStatus))}
+            >
+              {autoRunStatusLabel(autoStatus)}
+            </Badge>
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-[1.4fr_0.8fr_auto]">
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">
+                Strategy
+              </span>
+              <Select
+                value={autoStrategy}
+                onValueChange={(value) => {
+                  if (autoStatus === "running") {
+                    stopAutoRun("stopped", "Auto Run stopped after strategy change.")
+                  }
+                  setAutoStrategy(value as StrategyKey)
+                }}
+              >
+                <SelectTrigger className="h-9 w-full bg-background/70">
+                  <span className="truncate text-left text-sm">
+                    {STRATEGIES[autoStrategy].label}
+                  </span>
+                </SelectTrigger>
+                <SelectContent align="start">
+                  <SelectGroup>
+                    {Object.entries(STRATEGIES).map(([key, option]) => {
+                      const value = key as StrategyKey
+                      const disabled = isStrategyDisabled(value, selectedMandate)
+
+                      return (
+                        <SelectItem
+                          key={key}
+                          value={value}
+                          disabled={disabled}
+                          className="py-2"
+                        >
+                          <span className="flex flex-col gap-0.5">
+                            <span>{option.label}</span>
+                            <span className="text-xs text-muted-foreground">
+                              Expected: {option.expectation}
+                            </span>
+                          </span>
+                        </SelectItem>
+                      )
+                    })}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">
+                Interval
+              </span>
+              <Select
+                value={autoInterval}
+                onValueChange={(value) => {
+                  if (autoStatus === "running") {
+                    stopAutoRun("stopped", "Auto Run stopped after interval change.")
+                  }
+                  setAutoInterval(value as AutoRunInterval)
+                }}
+              >
+                <SelectTrigger className="h-9 w-full bg-background/70">
+                  <span className="truncate text-left text-sm">
+                    {selectedAutoIntervalLabel}
+                  </span>
+                </SelectTrigger>
+                <SelectContent align="start">
+                  <SelectGroup>
+                    {AUTO_RUN_INTERVALS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-end gap-2">
+              {autoStatus === "running" ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => stopAutoRun("stopped", "Auto Run stopped by user.")}
+                  className="h-9 w-full lg:w-auto"
+                >
+                  Stop
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  onClick={startAutoRun}
+                  disabled={
+                    isRunning || autoInterval === "off" || !canStartAutoRun
+                  }
+                  className="h-9 w-full bg-primary text-primary-foreground hover:bg-primary/90 lg:w-auto"
+                >
+                  Start
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <SummaryChip
+              label="Last run"
+              value={
+                autoLastDigest ? (
+                  <span className="inline-flex min-w-0 items-center gap-1">
+                    <CopyableId value={autoLastDigest} label="auto run digest" />
+                    <ExplorerLink digest={autoLastDigest} />
+                  </span>
+                ) : (
+                  "-"
+                )
+              }
+              mono={Boolean(autoLastDigest)}
+            />
+            <SummaryChip
+              label="Last run time"
+              value={formatAutoRunTime(autoLastRunTime)}
+              mono
+            />
+            <SummaryChip
+              label="Next run"
+              value={
+                autoStatus === "running"
+                  ? formatCountdown(autoNextRunAt, nowMs)
+                  : autoInterval === "off"
+                    ? "-"
+                    : selectedAutoIntervalLabel
+              }
+              mono
+            />
+            <SummaryChip label="Run count" value={autoRunCount} mono />
+          </div>
+
+          {(autoMessage || (autoInterval !== "off" && !autoRunValidation.ok)) && (
+            <p
+              className={cn(
+                "text-xs",
+                autoStatus === "error" ? "text-destructive" : "text-muted-foreground"
+              )}
+            >
+              {autoMessage ?? autoRunValidation.reason}
+            </p>
+          )}
+        </section>
 
         <section className="flex flex-col gap-3">
           <div className="flex items-center gap-4">
