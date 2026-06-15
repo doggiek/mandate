@@ -12,6 +12,8 @@ const NORMALIZED_SUI_TYPE =
   '0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI';
 const MIST_PER_SUI = 1_000_000_000n;
 const DEEP_SUI_POOL_ID = '0x48c95963e9eac37a316b7ae04a0deb761bcdcc2b67912374d6036e7f0e9bae9f';
+const DEFAULT_BACKEND_AGENT_ADDRESS =
+  '0x91dc52b575b3cd5703be07ee65e12b5af3a25d927b16fa8f94811b7b773ad8b2';
 const OLD_PACKAGE_ERROR =
   'Selected mandate belongs to an old package. Create a new mandate with the current package.';
 
@@ -42,6 +44,14 @@ type GasUsedLike = {
 
 function requireEnv(name: string): string {
   const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value.trim();
+}
+
+function requireEnvWithFallback(name: string, fallbackName: string): string {
+  const value = process.env[name] ?? process.env[fallbackName];
   if (!value) {
     throw new Error(`Missing required environment variable: ${name}`);
   }
@@ -252,7 +262,7 @@ function printDemoSummary({
 }
 
 async function main() {
-  const agentPrivateKey = requireEnv('AGENT_PRIVATE_KEY');
+  const agentPrivateKey = requireEnvWithFallback('BACKEND_AGENT_PRIVATE_KEY', 'AGENT_PRIVATE_KEY');
   const packageId = requireSuiAddressEnv('PACKAGE_ID');
   const mandateId = requireSuiAddressEnv('MANDATE_ID');
 
@@ -265,11 +275,20 @@ async function main() {
 
   const { secretKey, scheme } = decodeSuiPrivateKey(agentPrivateKey);
   if (scheme !== 'ED25519') {
-    throw new Error(`AGENT_PRIVATE_KEY must be an ED25519 Sui private key, got ${scheme}`);
+    throw new Error(`BACKEND_AGENT_PRIVATE_KEY must be an ED25519 Sui private key, got ${scheme}`);
   }
 
   const keypair = Ed25519Keypair.fromSecretKey(secretKey);
   const agentAddress = keypair.toSuiAddress();
+  const expectedAgentAddress =
+    process.env.NEXT_PUBLIC_BACKEND_AGENT_ADDRESS ??
+    process.env.NEXT_PUBLIC_VERIFIED_AGENT_ADDRESS ??
+    DEFAULT_BACKEND_AGENT_ADDRESS;
+  if (normalizeSuiAddress(expectedAgentAddress) !== normalizeSuiAddress(agentAddress)) {
+    throw new Error(
+      'NEXT_PUBLIC_BACKEND_AGENT_ADDRESS does not match BACKEND_AGENT_PRIVATE_KEY. Update .env.local so the Mandate backend agent address and backend agent signer are the same wallet.',
+    );
+  }
   const mandateObject = await fetchMandateObjectInfo(mandateId);
   const mandateObjectType = mandateObject.objectType;
   const mandateOwner = mandateObject.owner;

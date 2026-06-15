@@ -1,13 +1,16 @@
-"use client"
+"use client";
 
-import * as React from "react"
+import * as React from "react";
 import {
   useCurrentAccount,
   useSignAndExecuteTransaction,
   useSuiClient,
-} from "@mysten/dapp-kit"
-import { Transaction } from "@mysten/sui/transactions"
-import type { SuiEvent, SuiTransactionBlockResponse } from "@mysten/sui/jsonRpc"
+} from "@mysten/dapp-kit";
+import { Transaction } from "@mysten/sui/transactions";
+import type {
+  SuiEvent,
+  SuiTransactionBlockResponse,
+} from "@mysten/sui/jsonRpc";
 import {
   Dialog,
   DialogContent,
@@ -16,85 +19,99 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Field,
   FieldDescription,
   FieldGroup,
   FieldLabel,
-} from "@/components/ui/field"
+} from "@/components/ui/field";
 import {
   InputGroup,
   InputGroupAddon,
   InputGroupInput,
-} from "@/components/ui/input-group"
-import { CopyableId, shortId } from "@/components/copyable-id"
+} from "@/components/ui/input-group";
+import { CopyableId, shortId } from "@/components/copyable-id";
 import {
   Select,
   SelectContent,
   SelectGroup,
   SelectItem,
   SelectTrigger,
-} from "@/components/ui/select"
-import { toast } from "sonner"
-import {
-  AGENTS,
-  useMandateStore,
-} from "@/lib/mandate-store"
+} from "@/components/ui/select";
+import { toast } from "sonner";
+import { AGENTS, useMandateStore } from "@/lib/mandate-store";
 import {
   CLOCK_OBJECT_ID,
+  IS_PUBLIC_PACKAGE_ID_CONFIGURED,
+  IS_BACKEND_AGENT_ADDRESS_CONFIGURED,
+  IS_LEGACY_POLICY_PACKAGE_ID,
+  LEGACY_POLICY_PACKAGE_IDS,
   NETWORK,
   PACKAGE_ID,
-  VERIFIED_AGENT_ADDRESS,
-} from "@/lib/chain-config"
-import { Loader2 } from "lucide-react"
+  PACKAGE_ID_SOURCE,
+  PUBLIC_PACKAGE_ID,
+  PUBLIC_BACKEND_AGENT_ADDRESS,
+  BACKEND_AGENT_ADDRESS,
+  BACKEND_AGENT_ADDRESS_SOURCE,
+} from "@/lib/chain-config";
+import { Loader2 } from "lucide-react";
 
-const PROTOCOL_SCOPE_DEEPBOOK = 1
-const MIST_PER_SUI = BigInt(1_000_000_000)
-const SIGNING_TIMEOUT_MS = 60_000
+const PROTOCOL_SCOPE_DEEPBOOK = 1;
+const MIST_PER_SUI = BigInt(1_000_000_000);
+const SIGNING_TIMEOUT_MS = 60_000;
 const EXPIRATION_OPTIONS = [
   { label: "1h", value: "3600000", durationDays: 1 },
   { label: "12h", value: "43200000", durationDays: 1 },
   { label: "24h", value: "86400000", durationDays: 1 },
   { label: "7d", value: "604800000", durationDays: 7 },
-] as const
+] as const;
 
-type CreateStatus = "idle" | "signing" | "success" | "error"
+type CreateStatus = "idle" | "signing" | "success" | "error";
 
 function parseSuiToMist(value: string) {
-  const trimmed = value.trim()
-  const [wholePart, fractionalPart = ""] = trimmed.split(".")
+  const trimmed = value.trim();
+  const [wholePart, fractionalPart = ""] = trimmed.split(".");
 
-  if (
-    !wholePart ||
-    !/^\d+$/.test(wholePart) ||
-    !/^\d*$/.test(fractionalPart)
-  ) {
-    throw new Error(`Invalid SUI amount: ${value}`)
+  if (!wholePart || !/^\d+$/.test(wholePart) || !/^\d*$/.test(fractionalPart)) {
+    throw new Error(`Invalid SUI amount: ${value}`);
   }
 
-  const fractional = fractionalPart.padEnd(9, "0").slice(0, 9)
-  return BigInt(wholePart) * MIST_PER_SUI + BigInt(fractional || "0")
+  const fractional = fractionalPart.padEnd(9, "0").slice(0, 9);
+  return BigInt(wholePart) * MIST_PER_SUI + BigInt(fractional || "0");
 }
 
 function formatMistAsSui(mist: bigint) {
-  const whole = mist / MIST_PER_SUI
+  const whole = mist / MIST_PER_SUI;
   const fractional = (mist % MIST_PER_SUI)
     .toString()
     .padStart(9, "0")
-    .replace(/0+$/, "")
+    .replace(/0+$/, "");
 
-  return `${whole.toString()}${fractional ? `.${fractional}` : ""}`
+  return `${whole.toString()}${fractional ? `.${fractional}` : ""}`;
 }
 
 function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error)
+  return error instanceof Error ? error.message : String(error);
+}
+
+function getPositiveSuiAmountIssue(value: string, label: string) {
+  try {
+    const mist = parseSuiToMist(value);
+    return mist > BigInt(0) ? null : `${label} must be greater than 0`;
+  } catch {
+    return `${label} must be a valid SUI amount`;
+  }
+}
+
+function isLikelySuiAddress(value: string) {
+  return /^0x[a-fA-F0-9]{1,64}$/.test(value.trim());
 }
 
 function isCancellationLikeError(error: unknown) {
-  const message = getErrorMessage(error).toLowerCase()
+  const message = getErrorMessage(error).toLowerCase();
   return (
     message.includes("cancel") ||
     message.includes("reject") ||
@@ -102,176 +119,284 @@ function isCancellationLikeError(error: unknown) {
     message.includes("timeout") ||
     message.includes("closed") ||
     message.includes("user denied")
-  )
+  );
 }
 
 function withSigningTimeout<T>(promise: Promise<T>) {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
   const timeout = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
-      reject(new Error("Wallet signing timeout or interruption"))
-    }, SIGNING_TIMEOUT_MS)
-  })
+      reject(new Error("Wallet signing timeout or interruption"));
+    }, SIGNING_TIMEOUT_MS);
+  });
 
   return Promise.race([promise, timeout]).finally(() => {
     if (timeoutId) {
-      clearTimeout(timeoutId)
+      clearTimeout(timeoutId);
     }
-  })
+  });
 }
 
 function parsedJsonRecord(event: SuiEvent) {
   return event.parsedJson && typeof event.parsedJson === "object"
     ? (event.parsedJson as Record<string, unknown>)
-    : null
+    : null;
 }
 
 function findCreatedMandateId(result: SuiTransactionBlockResponse) {
-  const mandateType = `${PACKAGE_ID}::mandate::Mandate`
+  const mandateType = `${PACKAGE_ID}::mandate::Mandate`;
   const created = result.objectChanges?.find(
     (change) =>
       change.type === "created" &&
       "objectType" in change &&
-      change.objectType.includes(mandateType)
-  )
+      change.objectType.includes(mandateType),
+  );
 
   if (created && "objectId" in created) {
-    return created.objectId
+    return created.objectId;
   }
 
   const createdEvent = result.events?.find(
     (event) =>
       event.type.includes(`${PACKAGE_ID}::mandate::CreatedEvent`) ||
-      event.type.includes(`${PACKAGE_ID}::mandate::MandateCreatedEvent`)
-  )
-  const parsed = createdEvent ? parsedJsonRecord(createdEvent) : null
-  const mandateId = parsed?.mandate_id ?? parsed?.mandateId
+      event.type.includes(`${PACKAGE_ID}::mandate::MandateCreatedEvent`),
+  );
+  const parsed = createdEvent ? parsedJsonRecord(createdEvent) : null;
+  const mandateId = parsed?.mandate_id ?? parsed?.mandateId;
 
-  return typeof mandateId === "string" ? mandateId : null
+  return typeof mandateId === "string" ? mandateId : null;
 }
 
 export function CreateMandateDialog({
   open,
   onOpenChange,
 }: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
-  const { createMandate, refreshMandates } = useMandateStore()
-  const account = useCurrentAccount()
-  const client = useSuiClient()
-  const closeTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { createMandate, refreshMandates } = useMandateStore();
+  const account = useCurrentAccount();
+  const client = useSuiClient();
+  const closeTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
-  const [label, setLabel] = React.useState("")
-  const [agentAddress, setAgentAddress] = React.useState(VERIFIED_AGENT_ADDRESS)
-  const [budgetSui, setBudgetSui] = React.useState("0.1")
-  const [txLimitSui, setTxLimitSui] = React.useState("0.01")
-  const [ttlMs, setTtlMs] = React.useState(EXPIRATION_OPTIONS[2].value)
-  const [isSigning, setSigning] = React.useState(false)
-  const [status, setStatus] = React.useState<CreateStatus>("idle")
-  const [digest, setDigest] = React.useState<string | null>(null)
+  const [label, setLabel] = React.useState("");
+  const [agentAddress, setAgentAddress] = React.useState(
+    BACKEND_AGENT_ADDRESS,
+  );
+  const [budgetSui, setBudgetSui] = React.useState("0.1");
+  const [txLimitSui, setTxLimitSui] = React.useState("0.01");
+  const [ttlMs, setTtlMs] = React.useState(EXPIRATION_OPTIONS[2].value);
+  const [isSigning, setSigning] = React.useState(false);
+  const [status, setStatus] = React.useState<CreateStatus>("idle");
+  const [digest, setDigest] = React.useState<string | null>(null);
   const [createdMandateId, setCreatedMandateId] = React.useState<string | null>(
-    null
-  )
-  const [error, setError] = React.useState<string | null>(null)
+    null,
+  );
+  const [error, setError] = React.useState<string | null>(null);
   const [network, setNetwork] = React.useState<"mainnet" | "testnet">(
-    NETWORK as "mainnet" | "testnet"
-  )
+    NETWORK as "mainnet" | "testnet",
+  );
 
-  const signAndExecute = useSignAndExecuteTransaction<SuiTransactionBlockResponse>({
-    execute: ({ bytes, signature }) =>
-      client.executeTransactionBlock({
-        transactionBlock: bytes,
-        signature,
-        requestType: "WaitForLocalExecution",
-        options: {
-          showEffects: true,
-          showEvents: true,
-          showObjectChanges: true,
-        },
-      }),
-  })
+  const signAndExecute =
+    useSignAndExecuteTransaction<SuiTransactionBlockResponse>({
+      execute: ({ bytes, signature }) =>
+        client.executeTransactionBlock({
+          transactionBlock: bytes,
+          signature,
+          requestType: "WaitForLocalExecution",
+          options: {
+            showEffects: true,
+            showEvents: true,
+            showObjectChanges: true,
+          },
+        }),
+    });
 
   React.useEffect(() => {
     if (open && !agentAddress) {
-      setAgentAddress(VERIFIED_AGENT_ADDRESS)
+      setAgentAddress(BACKEND_AGENT_ADDRESS);
     }
-  }, [agentAddress, open])
+  }, [agentAddress, open]);
+
+  React.useEffect(() => {
+    if (process.env.NODE_ENV === "production") {
+      return;
+    }
+
+    console.info("[MANDATE] create config", {
+      rawNextPublicPackageId: process.env.NEXT_PUBLIC_PACKAGE_ID,
+      nextPublicPackageId: PUBLIC_PACKAGE_ID || "(not configured)",
+      packageId: PACKAGE_ID,
+      packageIdSource: PACKAGE_ID_SOURCE,
+      isPublicPackageIdConfigured: IS_PUBLIC_PACKAGE_ID_CONFIGURED,
+      legacyPolicyPackageIds: LEGACY_POLICY_PACKAGE_IDS,
+      isLegacyPolicyPackage: IS_LEGACY_POLICY_PACKAGE_ID,
+      rawNextPublicBackendAgentAddress:
+        process.env.NEXT_PUBLIC_BACKEND_AGENT_ADDRESS,
+      nextPublicBackendAgentAddress:
+        PUBLIC_BACKEND_AGENT_ADDRESS || "(not configured)",
+      backendAgentAddressSource: BACKEND_AGENT_ADDRESS_SOURCE,
+      isBackendAgentAddressConfigured: IS_BACKEND_AGENT_ADDRESS_CONFIGURED,
+    });
+  }, []);
 
   React.useEffect(() => {
     return () => {
       if (closeTimeoutRef.current) {
-        clearTimeout(closeTimeoutRef.current)
+        clearTimeout(closeTimeoutRef.current);
       }
-    }
-  }, [])
+    };
+  }, []);
 
   React.useEffect(() => {
     if (open) {
-      return
+      return;
     }
 
     if (closeTimeoutRef.current) {
-      clearTimeout(closeTimeoutRef.current)
-      closeTimeoutRef.current = null
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
     }
-  }, [open])
+  }, [open]);
 
   function reset() {
-    setLabel("")
-    setAgentAddress(VERIFIED_AGENT_ADDRESS)
-    setBudgetSui("0.1")
-    setTxLimitSui("0.01")
-    setTtlMs(EXPIRATION_OPTIONS[2].value)
-    setSigning(false)
-    setStatus("idle")
-    setDigest(null)
-    setCreatedMandateId(null)
-    setError(null)
-    setNetwork(NETWORK as "mainnet" | "testnet")
+    setLabel("");
+    setAgentAddress(BACKEND_AGENT_ADDRESS);
+    setBudgetSui("0.1");
+    setTxLimitSui("0.01");
+    setTtlMs(EXPIRATION_OPTIONS[2].value);
+    setSigning(false);
+    setStatus("idle");
+    setDigest(null);
+    setCreatedMandateId(null);
+    setError(null);
+    setNetwork(NETWORK as "mainnet" | "testnet");
   }
 
   function handleOpenChange(nextOpen: boolean) {
-    onOpenChange(nextOpen)
+    onOpenChange(nextOpen);
 
     if (!nextOpen) {
       if (closeTimeoutRef.current) {
-        clearTimeout(closeTimeoutRef.current)
-        closeTimeoutRef.current = null
+        clearTimeout(closeTimeoutRef.current);
+        closeTimeoutRef.current = null;
       }
-      reset()
+      reset();
     }
   }
 
-  const valid =
-    label.trim().length > 0 &&
-    Boolean(account?.address) &&
-    agentAddress.trim().length > 0 &&
-    !isSigning
+  const budgetIssue = getPositiveSuiAmountIssue(budgetSui, "Budget");
+  const txLimitIssue = getPositiveSuiAmountIssue(txLimitSui, "Max tx");
+  const agentAddressIssue = !IS_BACKEND_AGENT_ADDRESS_CONFIGURED
+    ? "Backend agent address is missing from NEXT_PUBLIC_BACKEND_AGENT_ADDRESS."
+    : !agentAddress.trim()
+      ? "Backend agent address is missing."
+      : !isLikelySuiAddress(agentAddress)
+        ? "Backend agent address is invalid."
+        : null;
+  const disabledReasons = [
+    !account?.address ? "wallet not connected" : null,
+    !label.trim() ? "label missing" : null,
+    PACKAGE_ID_SOURCE !== "NEXT_PUBLIC_PACKAGE_ID"
+      ? "package id missing"
+      : null,
+    IS_LEGACY_POLICY_PACKAGE_ID ? "legacy package" : null,
+    !IS_BACKEND_AGENT_ADDRESS_CONFIGURED
+      ? "backend agent address missing"
+      : null,
+    agentAddressIssue && IS_BACKEND_AGENT_ADDRESS_CONFIGURED
+      ? "backend agent address invalid"
+      : null,
+    budgetIssue ? "invalid budget" : null,
+    txLimitIssue ? "invalid max tx" : null,
+    isSigning ? "submitting" : null,
+  ].filter((reason): reason is string => Boolean(reason));
+  const valid = disabledReasons.length === 0;
+  const visibleDisabledReason = disabledReasons[0] ?? null;
   const selectedExpiration =
     EXPIRATION_OPTIONS.find((option) => option.value === ttlMs) ??
-    EXPIRATION_OPTIONS[2]
+    EXPIRATION_OPTIONS[2];
+
+  React.useEffect(() => {
+    if (process.env.NODE_ENV === "production" || !open) {
+      return;
+    }
+
+    console.info("[MANDATE] create disabled reasons", {
+      disabled: !valid,
+      reasons: disabledReasons,
+
+      packageId: PACKAGE_ID,
+      packageIdSource: PACKAGE_ID_SOURCE,
+      isPublicPackageIdConfigured: IS_PUBLIC_PACKAGE_ID_CONFIGURED,
+      legacyPolicyPackageIds: LEGACY_POLICY_PACKAGE_IDS,
+      isLegacyPolicyPackage: IS_LEGACY_POLICY_PACKAGE_ID,
+
+      backendAgentAddress: BACKEND_AGENT_ADDRESS,
+      backendAgentAddressSource: BACKEND_AGENT_ADDRESS_SOURCE,
+      isBackendAgentAddressConfigured: IS_BACKEND_AGENT_ADDRESS_CONFIGURED,
+
+      walletConnected: Boolean(account?.address),
+      budgetIssue,
+      txLimitIssue,
+      agentAddressIssue,
+      submitting: isSigning,
+    });
+  }, [
+    account?.address,
+    agentAddressIssue,
+    budgetIssue,
+    disabledReasons,
+    isSigning,
+    open,
+    txLimitIssue,
+    valid,
+  ]);
 
   async function handleSubmit() {
-    if (!valid) return
+    if (!valid) return;
 
-    console.log("[MANDATE] signing started")
-    setSigning(true)
-    setStatus("signing")
-    setDigest(null)
-    setCreatedMandateId(null)
-    setError(null)
+    console.log("[MANDATE] signing started");
+    setSigning(true);
+    setStatus("signing");
+    setDigest(null);
+    setCreatedMandateId(null);
+    setError(null);
 
     try {
-      const budgetCeilingMist = parseSuiToMist(budgetSui)
-      const maxSingleTxMist = parseSuiToMist(txLimitSui)
-
-      if (budgetCeilingMist <= BigInt(0) || maxSingleTxMist <= BigInt(0)) {
-        throw new Error("Budget and max single transaction must be greater than 0")
+      if (!IS_PUBLIC_PACKAGE_ID_CONFIGURED) {
+        throw new Error(
+          "NEXT_PUBLIC_PACKAGE_ID is not loaded in the frontend bundle. Update root .env.local and restart Next.js from the repository root.",
+        );
       }
 
-      const tx = new Transaction()
-      const [budgetCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(budgetCeilingMist)])
+      if (!IS_BACKEND_AGENT_ADDRESS_CONFIGURED) {
+        throw new Error(
+          "NEXT_PUBLIC_BACKEND_AGENT_ADDRESS is not loaded in the frontend bundle. Update root .env.local and restart Next.js from the repository root.",
+        );
+      }
+
+      if (IS_LEGACY_POLICY_PACKAGE_ID) {
+        throw new Error(
+          "PACKAGE_ID still points to a legacy policy-only package. Publish the vault package, update NEXT_PUBLIC_PACKAGE_ID/PACKAGE_ID, and restart Next.js.",
+        );
+      }
+
+      const budgetCeilingMist = parseSuiToMist(budgetSui);
+      const maxSingleTxMist = parseSuiToMist(txLimitSui);
+
+      if (budgetCeilingMist <= BigInt(0) || maxSingleTxMist <= BigInt(0)) {
+        throw new Error(
+          "Budget and max single transaction must be greater than 0",
+        );
+      }
+
+      const tx = new Transaction();
+      const [budgetCoin] = tx.splitCoins(tx.gas, [
+        tx.pure.u64(budgetCeilingMist),
+      ]);
       tx.moveCall({
         target: `${PACKAGE_ID}::mandate::create_mandate`,
         arguments: [
@@ -282,21 +407,23 @@ export function CreateMandateDialog({
           tx.pure.u64(ttlMs),
           tx.object(CLOCK_OBJECT_ID),
         ],
-      })
+      });
 
       const result = await withSigningTimeout(
-        signAndExecute.mutateAsync({ transaction: tx })
-      )
-      console.log("[MANDATE] signed", result)
-      const executionStatus = result.effects?.status
+        signAndExecute.mutateAsync({ transaction: tx }),
+      );
+      console.log("[MANDATE] signed", result);
+      const executionStatus = result.effects?.status;
 
       if (executionStatus?.status !== "success") {
-        throw new Error(executionStatus?.error ?? "Transaction failed")
+        throw new Error(executionStatus?.error ?? "Transaction failed");
       }
 
-      const mandateId = findCreatedMandateId(result)
+      const mandateId = findCreatedMandateId(result);
       if (!mandateId) {
-        throw new Error("Transaction succeeded but Mandate object id was not found")
+        throw new Error(
+          "Transaction succeeded but Mandate object id was not found",
+        );
       }
 
       createMandate({
@@ -314,36 +441,36 @@ export function CreateMandateDialog({
         digest: result.digest,
         ttlMs,
         expiresLabel: selectedExpiration.label,
-      })
+      });
 
-      setDigest(result.digest)
-      setCreatedMandateId(mandateId)
-      setStatus("success")
+      setDigest(result.digest);
+      setCreatedMandateId(mandateId);
+      setStatus("success");
       toast.success("Mandate created on-chain", {
         description: `${shortId(mandateId)} · ${shortId(result.digest)}`,
-      })
-      refreshMandates()
-      window.setTimeout(refreshMandates, 1_200)
+      });
+      refreshMandates();
+      window.setTimeout(refreshMandates, 1_200);
       if (closeTimeoutRef.current) {
-        clearTimeout(closeTimeoutRef.current)
+        clearTimeout(closeTimeoutRef.current);
       }
       closeTimeoutRef.current = setTimeout(() => {
-        handleOpenChange(false)
-        refreshMandates()
-        window.setTimeout(refreshMandates, 1_200)
-      }, 800)
+        handleOpenChange(false);
+        refreshMandates();
+        window.setTimeout(refreshMandates, 1_200);
+      }, 800);
     } catch (caught) {
-      console.error("[MANDATE] failed", caught)
-      setStatus("error")
+      console.error("[MANDATE] failed", caught);
+      setStatus("error");
       setError(
         isCancellationLikeError(caught)
           ? "Transaction was cancelled or interrupted. Please try again."
-          : getErrorMessage(caught)
-      )
+          : getErrorMessage(caught),
+      );
     } finally {
-      setSigning(false)
-      setStatus((current) => (current === "signing" ? "idle" : current))
-      console.log("[MANDATE] signing finished")
+      setSigning(false);
+      setStatus((current) => (current === "signing" ? "idle" : current));
+      console.log("[MANDATE] signing finished");
     }
   }
 
@@ -361,7 +488,7 @@ export function CreateMandateDialog({
 
         <div className="px-5 py-4">
           <FieldGroup className="gap-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4">
               <Field>
                 <FieldLabel htmlFor="mandate-label">Label</FieldLabel>
                 <Input
@@ -372,21 +499,6 @@ export function CreateMandateDialog({
                 />
                 <FieldDescription>
                   Name used to identify this mandate.
-                </FieldDescription>
-              </Field>
-
-              <Field>
-                <FieldLabel htmlFor="mandate-agent">Agent address</FieldLabel>
-                <Input
-                  id="mandate-agent"
-                  placeholder="0x..."
-                  value={agentAddress}
-                  className="min-w-0 font-mono text-xs"
-                  onChange={(event) => setAgentAddress(event.target.value)}
-                />
-                <FieldDescription>
-                  This is the backend agent wallet. The owner keeps their key;
-                  the agent only receives a scoped Mandate object.
                 </FieldDescription>
               </Field>
             </div>
@@ -412,7 +524,9 @@ export function CreateMandateDialog({
               </Field>
 
               <Field>
-                <FieldLabel htmlFor="tx-limit">Max single transaction</FieldLabel>
+                <FieldLabel htmlFor="tx-limit">
+                  Max single transaction
+                </FieldLabel>
                 <InputGroup>
                   <InputGroupInput
                     id="tx-limit"
@@ -437,7 +551,10 @@ export function CreateMandateDialog({
 
               <Field>
                 <FieldLabel>Expiration</FieldLabel>
-                <Select value={ttlMs} onValueChange={(value) => value && setTtlMs(value)}>
+                <Select
+                  value={ttlMs}
+                  onValueChange={(value) => value && setTtlMs(value)}
+                >
                   <SelectTrigger className="w-full border-cyan-400/15 bg-white/[0.03]">
                     <span>{selectedExpiration.label}</span>
                   </SelectTrigger>
@@ -464,6 +581,26 @@ export function CreateMandateDialog({
             {!account && (
               <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-400">
                 Connect a Sui wallet before creating an on-chain mandate.
+              </div>
+            )}
+
+            {account && PACKAGE_ID_SOURCE !== "NEXT_PUBLIC_PACKAGE_ID" && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                NEXT_PUBLIC_PACKAGE_ID is not loaded in the frontend bundle.
+                Restart Next.js from the repository root after updating
+                .env.local.
+              </div>
+            )}
+
+            {account && agentAddressIssue && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {agentAddressIssue}
+              </div>
+            )}
+
+            {account && (budgetIssue || txLimitIssue) && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {budgetIssue ?? txLimitIssue}
               </div>
             )}
 
@@ -517,6 +654,7 @@ export function CreateMandateDialog({
           <Button
             onClick={handleSubmit}
             disabled={!valid}
+            title={visibleDisabledReason ?? undefined}
             className="bg-primary text-primary-foreground hover:bg-primary/90"
           >
             {isSigning && <Loader2 className="animate-spin" />}
@@ -529,5 +667,5 @@ export function CreateMandateDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  );
 }

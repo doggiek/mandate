@@ -2,9 +2,13 @@ import { execFile } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 import { promisify } from "node:util"
+import { decodeSuiPrivateKey } from "@mysten/sui/cryptography"
+import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519"
 import {
   CURRENT_MANDATE_ID,
   DEEPBOOK_POOL_KEY,
+  LEGACY_POLICY_PACKAGE_IDS,
+  BACKEND_AGENT_ADDRESS,
 } from "@/lib/chain-config"
 
 const execFileAsync = promisify(execFile)
@@ -114,6 +118,16 @@ function runtimePackageId(repoRoot: string) {
   if (!packageId) {
     throw new Error("PACKAGE_ID is not configured.")
   }
+  if (
+    LEGACY_POLICY_PACKAGE_IDS.some(
+      (legacyPackageId) =>
+        normalizeSuiAddress(legacyPackageId) === normalizeSuiAddress(packageId)
+    )
+  ) {
+    throw new Error(
+      "PACKAGE_ID points to a legacy policy-only package. Publish the vault package, update PACKAGE_ID/NEXT_PUBLIC_PACKAGE_ID, and restart Next.js."
+    )
+  }
 
   if (process.env.NODE_ENV !== "production" && !loggedPackageId) {
     console.info(`[MANDATE] API using PACKAGE_ID ${packageId}`)
@@ -124,15 +138,49 @@ function runtimePackageId(repoRoot: string) {
 }
 
 function runtimeAgentPrivateKey(repoRoot: string) {
-  const agentPrivateKey = runtimeEnvValue("AGENT_PRIVATE_KEY", repoRoot)
+  const agentPrivateKey =
+    runtimeEnvValue("BACKEND_AGENT_PRIVATE_KEY", repoRoot) ??
+    runtimeEnvValue("AGENT_PRIVATE_KEY", repoRoot)
 
   if (!agentPrivateKey) {
     throw new Error(
-      "AGENT_PRIVATE_KEY is not configured. Set AGENT_PRIVATE_KEY in .env.local so Run Agent can be signed by the backend agent wallet."
+      "BACKEND_AGENT_PRIVATE_KEY is not configured. Set BACKEND_AGENT_PRIVATE_KEY in .env.local so Run Agent can be signed by the backend agent signer."
     )
   }
 
   return agentPrivateKey
+}
+
+function agentAddressFromPrivateKey(agentPrivateKey: string) {
+  const { secretKey, scheme } = decodeSuiPrivateKey(agentPrivateKey)
+  if (scheme !== "ED25519") {
+    throw new Error(`BACKEND_AGENT_PRIVATE_KEY must be an ED25519 Sui private key, got ${scheme}.`)
+  }
+
+  return Ed25519Keypair.fromSecretKey(secretKey).toSuiAddress()
+}
+
+function runtimeBackendAgentAddress(repoRoot: string) {
+  return (
+    runtimeEnvValue("NEXT_PUBLIC_BACKEND_AGENT_ADDRESS", repoRoot) ??
+    runtimeEnvValue("NEXT_PUBLIC_VERIFIED_AGENT_ADDRESS", repoRoot) ??
+    BACKEND_AGENT_ADDRESS
+  )
+}
+
+function assertBackendAgentMatchesSigner(
+  expectedAgentAddress: string,
+  agentPrivateKey: string
+) {
+  const signerAddress = agentAddressFromPrivateKey(agentPrivateKey)
+
+  if (
+    normalizeSuiAddress(expectedAgentAddress) !== normalizeSuiAddress(signerAddress)
+  ) {
+    throw new Error(
+      "NEXT_PUBLIC_BACKEND_AGENT_ADDRESS does not match BACKEND_AGENT_PRIVATE_KEY. Update .env.local so the Mandate backend agent address and backend agent signer are the same wallet."
+    )
+  }
 }
 
 function normalizeSuiAddress(value?: string | null) {
@@ -321,10 +369,13 @@ export async function POST(request: Request) {
   const blockedReason = requestBlockedReason(body)
   let packageId: string
   let agentPrivateKey: string
+  let backendAgentAddress: string
 
   try {
     packageId = runtimePackageId(repoRoot)
     agentPrivateKey = runtimeAgentPrivateKey(repoRoot)
+    backendAgentAddress = runtimeBackendAgentAddress(repoRoot)
+    assertBackendAgentMatchesSigner(backendAgentAddress, agentPrivateKey)
   } catch (caught) {
     const error = caught instanceof Error ? caught.message : String(caught)
     return Response.json({ ...EMPTY_RESULT, error }, { status: 500 })
@@ -354,9 +405,11 @@ export async function POST(request: Request) {
         cwd: repoRoot,
         env: {
           ...process.env,
+          BACKEND_AGENT_PRIVATE_KEY: agentPrivateKey,
           AGENT_PRIVATE_KEY: agentPrivateKey,
           PACKAGE_ID: packageId,
           NEXT_PUBLIC_PACKAGE_ID: packageId,
+          NEXT_PUBLIC_BACKEND_AGENT_ADDRESS: backendAgentAddress,
           MANDATE_ID: mandateId,
           POOL_KEY: DEEPBOOK_POOL_KEY,
           AMOUNT_SUI: amountSui,

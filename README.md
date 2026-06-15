@@ -52,6 +52,11 @@ npm run dev
 Run `npm run dev` from the repository root. The web app loads environment
 variables from the root `.env.local`; do not copy secrets into `apps/web`.
 
+Agent execution uses `BACKEND_AGENT_PRIVATE_KEY` as the platform backend Agent
+signer. It pays gas and submits autonomous PTBs; it is not a user wallet private
+key. User SUI budget comes from the Mandate vault, and swap output assets return
+to the Owner wallet. `NEXT_PUBLIC_BACKEND_AGENT_ADDRESS` must match that signer.
+
 ## Testnet Deployment
 
 Publish contract:

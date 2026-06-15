@@ -27,6 +27,20 @@ NEXT_PUBLIC_PACKAGE_ID=<package_id>
 PACKAGE_ID=<package_id>
 ```
 
+Configure the backend Agent signer:
+
+```bash
+BACKEND_AGENT_PRIVATE_KEY=<sui-private-key>
+NEXT_PUBLIC_BACKEND_AGENT_ADDRESS=<backend-agent-address>
+```
+
+`BACKEND_AGENT_PRIVATE_KEY` is the platform backend Agent signer. It pays gas
+and submits autonomous PTBs. It is not the Owner wallet private key; Owner funds
+come from the Mandate vault, and swap output assets return to the Owner wallet.
+
+Legacy names are still accepted as fallback during local migration:
+`AGENT_PRIVATE_KEY` and `NEXT_PUBLIC_VERIFIED_AGENT_ADDRESS`.
+
 Restart the Next.js dev server from the repository root after updating
 `.env.local`:
 

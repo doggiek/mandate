@@ -10,6 +10,8 @@ const SUI_TYPE = '0x2::sui::SUI';
 const NORMALIZED_SUI_TYPE =
   '0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI';
 const MIST_PER_SUI = 1_000_000_000n;
+const DEFAULT_BACKEND_AGENT_ADDRESS =
+  '0x91dc52b575b3cd5703be07ee65e12b5af3a25d927b16fa8f94811b7b773ad8b2';
 
 type TransactionLike = {
   digest?: string;
@@ -42,12 +44,27 @@ function requireEnv(name: string): string {
   return value.trim();
 }
 
+function requireEnvWithFallback(name: string, fallbackName: string): string {
+  const value = process.env[name] ?? process.env[fallbackName];
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value.trim();
+}
+
 function requireSuiAddressEnv(name: string): string {
   const value = requireEnv(name);
   if (!isValidSuiAddress(value)) {
     throw new Error(`${name} must be a valid Sui object/address id, got: ${value}`);
   }
   return value;
+}
+
+function normalizeSuiAddress(value: string): string {
+  const raw = value.trim().toLowerCase();
+  const withoutPrefix = raw.startsWith('0x') ? raw.slice(2) : raw;
+  const normalized = withoutPrefix.replace(/^0+/, '') || '0';
+  return `0x${normalized}`;
 }
 
 function parseSuiToMist(value: string): bigint {
@@ -157,7 +174,7 @@ function printDemoSummary({
 }
 
 async function main() {
-  const agentPrivateKey = requireEnv('AGENT_PRIVATE_KEY');
+  const agentPrivateKey = requireEnvWithFallback('BACKEND_AGENT_PRIVATE_KEY', 'AGENT_PRIVATE_KEY');
   const packageId = requireSuiAddressEnv('PACKAGE_ID');
   const mandateId = requireSuiAddressEnv('MANDATE_ID');
   const amountSui = process.env.AMOUNT_SUI ?? '0.001';
@@ -166,11 +183,20 @@ async function main() {
 
   const { secretKey, scheme } = decodeSuiPrivateKey(agentPrivateKey);
   if (scheme !== 'ED25519') {
-    throw new Error(`AGENT_PRIVATE_KEY must be an ED25519 Sui private key, got ${scheme}`);
+    throw new Error(`BACKEND_AGENT_PRIVATE_KEY must be an ED25519 Sui private key, got ${scheme}`);
   }
 
   const keypair = Ed25519Keypair.fromSecretKey(secretKey);
   const agentAddress = keypair.toSuiAddress();
+  const expectedAgentAddress =
+    process.env.NEXT_PUBLIC_BACKEND_AGENT_ADDRESS ??
+    process.env.NEXT_PUBLIC_VERIFIED_AGENT_ADDRESS ??
+    DEFAULT_BACKEND_AGENT_ADDRESS;
+  if (normalizeSuiAddress(expectedAgentAddress) !== normalizeSuiAddress(agentAddress)) {
+    throw new Error(
+      'NEXT_PUBLIC_BACKEND_AGENT_ADDRESS does not match BACKEND_AGENT_PRIVATE_KEY. Update .env.local so the Mandate backend agent address and backend agent signer are the same wallet.',
+    );
+  }
   const client = new SuiGrpcClient({
     network: 'testnet',
     baseUrl: 'https://fullnode.testnet.sui.io:443',

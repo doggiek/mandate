@@ -754,8 +754,8 @@ export function MandateStoreProvider({
           .filter((mandate): mandate is Mandate => Boolean(mandate))
           .filter(
             (mandate) =>
-              !mandate.ownerAddress ||
-              mandate.ownerAddress.toLowerCase() === account.address.toLowerCase()
+              mandate.ownerAddress?.toLowerCase() === account.address.toLowerCase() &&
+              isCurrentMandateObjectType(mandate.objectType)
           )
         const mandateIds = createdMandates.map((mandate) => mandate.id)
         const [activityEvents, revokeEvents, rejectEvents, blockedEvents] = await Promise.all([
@@ -1088,13 +1088,13 @@ export function MandateStoreProvider({
 
   const walletUserMandates = React.useMemo(() => {
     if (!account?.address) {
-      return userMandates
+      return []
     }
 
     return userMandates.filter(
       (mandate) =>
-        !mandate.ownerAddress ||
-        mandate.ownerAddress.toLowerCase() === account.address.toLowerCase()
+        mandate.ownerAddress?.toLowerCase() === account.address.toLowerCase() &&
+        isCurrentMandateObjectType(mandate.objectType)
     )
   }, [account?.address, userMandates])
 
@@ -1145,20 +1145,22 @@ export function MandateStoreProvider({
     const activityExecutions = activity
       .map((event) => activityToExecution(event, mandateById.get(event.mandateId)))
       .filter((execution): execution is DeepBookOrder => Boolean(execution))
-    const localExecutions: DeepBookOrder[] = executionHistory.map((execution) => {
-      const status: ExecutionStatus =
-        execution.status === "failed" ? "failed" : "executed"
+    const localExecutions: DeepBookOrder[] = executionHistory
+      .filter((execution) => mandateById.has(execution.mandateId))
+      .map((execution) => {
+        const status: ExecutionStatus =
+          execution.status === "failed" ? "failed" : "executed"
 
-      return {
-        ...execution,
-        pair: execution.pair ?? DEEPBOOK_POOL_KEY,
-        side: execution.side ?? "Buy",
-        amountSui: execution.amountSui ?? 0.001,
-        status,
-        mandateLabel:
-          mandateById.get(execution.mandateId)?.label ?? execution.mandateLabel,
-      }
-    })
+        return {
+          ...execution,
+          pair: execution.pair ?? DEEPBOOK_POOL_KEY,
+          side: execution.side ?? "Buy",
+          amountSui: execution.amountSui ?? 0.001,
+          status,
+          mandateLabel:
+            mandateById.get(execution.mandateId)?.label ?? execution.mandateLabel,
+        }
+      })
 
     return uniqExecutions([...activityExecutions, ...localExecutions]).sort(
       (a, b) => b.timestamp - a.timestamp

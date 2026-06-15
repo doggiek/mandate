@@ -34,7 +34,7 @@ import {
   DEEPBOOK_POOL_KEY,
   DEEPBOOK_POOL_ID,
   isCurrentMandateObjectType,
-  VERIFIED_AGENT_ADDRESS,
+  BACKEND_AGENT_ADDRESS,
 } from "@/lib/chain-config"
 import { formatSui, stableExpiryLabel } from "@/lib/format"
 import { useMandateStore } from "@/lib/mandate-store"
@@ -510,7 +510,7 @@ export function AgentExecutionPanel() {
     selectedMandate?.protocol ?? selectedMandate?.protocols[0]
   const agentWalletMatches =
     Boolean(selectedAgentAddress) &&
-    selectedAgentAddress?.toLowerCase() === VERIFIED_AGENT_ADDRESS.toLowerCase()
+    selectedAgentAddress?.toLowerCase() === BACKEND_AGENT_ADDRESS.toLowerCase()
   const protocolAllowed = selectedProtocol === "DeepBook"
   const packageAllowed = belongsToCurrentPackage(selectedMandate)
   const remainingBudget = selectedMandate
@@ -536,7 +536,7 @@ export function AgentExecutionPanel() {
         return {
           ok: false,
           reason:
-            "Selected Mandate must authorize the backend Trading Agent wallet.",
+            "Selected Mandate must authorize the backend Trading Agent address.",
         }
       }
 

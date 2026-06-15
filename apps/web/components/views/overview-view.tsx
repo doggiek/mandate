@@ -41,8 +41,8 @@ function SummaryMetricSkeleton() {
 
 function MiniMetricsSkeleton() {
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, index) => (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {Array.from({ length: 3 }).map((_, index) => (
         <div
           key={index}
           className="min-h-[92px] rounded-xl border border-border bg-card/50 p-3"
@@ -282,7 +282,7 @@ export function OverviewView({
             helper={`${stats.blockedActions} policy blocks`}
           />
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <SummaryMetricCard
             mini
             label="DeepBook Executions"
@@ -313,14 +313,11 @@ export function OverviewView({
             }
             helper="Most recent successful PTB"
           />
-          <SummaryMetricCard
-            mini
-            label="Policy Rules"
-            value="4 rules"
-            helper="Max tx · Budget · Expiry · Revoke"
-            title="Max tx · Budget · Expiry · Revoke"
-          />
         </div>
+        <p className="text-xs text-muted-foreground">
+          Policy rules: Max tx, budget, expiry, and revoke are enforced before
+          execution.
+        </p>
       </section>
 
       <AgentExecutionPanel />

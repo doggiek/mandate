@@ -4,10 +4,23 @@ export const NETWORK = (
   process.env.NEXT_PUBLIC_SUI_NETWORK ?? "testnet"
 ) as SuiNetwork
 
-export const PACKAGE_ID =
-  process.env.NEXT_PUBLIC_PACKAGE_ID ??
-  process.env.PACKAGE_ID ??
+export const LEGACY_DEFAULT_PACKAGE_ID =
   "0x18675445cebd947ab5f5b5e01fcd101a343f44ec76f064cb77b2e23f1f878fbc"
+
+export const LEGACY_POLICY_PACKAGE_IDS = [
+  LEGACY_DEFAULT_PACKAGE_ID,
+  "0xad7bb3a9c4d29962018fc1f2a1b968b283842a2c27c55ad7b5787725733fd2e9",
+]
+
+export const PUBLIC_PACKAGE_ID = process.env.NEXT_PUBLIC_PACKAGE_ID?.trim() ?? ""
+
+export const PACKAGE_ID = PUBLIC_PACKAGE_ID
+
+export const PACKAGE_ID_SOURCE = PUBLIC_PACKAGE_ID
+  ? "NEXT_PUBLIC_PACKAGE_ID"
+  : "missing"
+
+export const IS_PUBLIC_PACKAGE_ID_CONFIGURED = Boolean(PUBLIC_PACKAGE_ID)
 
 export const CURRENT_MANDATE_ID =
   process.env.NEXT_PUBLIC_CURRENT_MANDATE_ID ??
@@ -27,18 +40,39 @@ export const VERIFIED_DEEPBOOK_DIGEST =
   process.env.NEXT_PUBLIC_VERIFIED_DEEPBOOK_DIGEST ??
   "DkV1SdVQhYw8U8ErQzkVZH225LkPqBeKtJBzkLk6PSfX"
 
-export const VERIFIED_AGENT_ADDRESS =
-  process.env.NEXT_PUBLIC_VERIFIED_AGENT_ADDRESS ??
+const PUBLIC_BACKEND_AGENT_ADDRESS_VALUE =
+  process.env.NEXT_PUBLIC_BACKEND_AGENT_ADDRESS?.trim()
+const LEGACY_PUBLIC_AGENT_ADDRESS_VALUE =
+  process.env.NEXT_PUBLIC_VERIFIED_AGENT_ADDRESS?.trim()
+
+export const PUBLIC_BACKEND_AGENT_ADDRESS =
+  PUBLIC_BACKEND_AGENT_ADDRESS_VALUE || LEGACY_PUBLIC_AGENT_ADDRESS_VALUE || ""
+
+export const BACKEND_AGENT_ADDRESS =
+  PUBLIC_BACKEND_AGENT_ADDRESS ||
   "0x91dc52b575b3cd5703be07ee65e12b5af3a25d927b16fa8f94811b7b773ad8b2"
 
-export const AGENT_WALLET_ADDRESS =
-  process.env.NEXT_PUBLIC_AGENT_WALLET_ADDRESS ?? VERIFIED_AGENT_ADDRESS
+export const BACKEND_AGENT_ADDRESS_SOURCE = PUBLIC_BACKEND_AGENT_ADDRESS_VALUE
+  ? "NEXT_PUBLIC_BACKEND_AGENT_ADDRESS"
+  : LEGACY_PUBLIC_AGENT_ADDRESS_VALUE
+    ? "NEXT_PUBLIC_VERIFIED_AGENT_ADDRESS"
+    : "fallback"
+
+export const IS_BACKEND_AGENT_ADDRESS_CONFIGURED = Boolean(
+  PUBLIC_BACKEND_AGENT_ADDRESS
+)
 
 export function formatConfigId(value: string, prefixLength = 6, suffixLength = 4) {
   return `${value.slice(0, prefixLength)}...${value.slice(-suffixLength)}`
 }
 
 export const NETWORK_LABEL = NETWORK.toUpperCase()
+
+export const IS_LEGACY_POLICY_PACKAGE_ID = LEGACY_POLICY_PACKAGE_IDS.some(
+  (packageId) =>
+    IS_PUBLIC_PACKAGE_ID_CONFIGURED &&
+    normalizeSuiAddress(PACKAGE_ID) === normalizeSuiAddress(packageId)
+)
 
 export function normalizeSuiAddress(value?: string | null) {
   const raw = value?.trim().toLowerCase()
