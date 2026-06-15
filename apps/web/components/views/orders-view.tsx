@@ -20,19 +20,21 @@ import { useMandateStore } from "@/lib/mandate-store"
 const DEEPBOOK_PAIR = "DEEP/SUI"
 const DEEPBOOK_SIDE = "Buy"
 const PAGE_SIZE = 20
+const ORDER_GRID =
+  "grid-cols-[minmax(0,1.45fr)_minmax(0,1.05fr)_minmax(0,0.85fr)_minmax(0,0.8fr)_minmax(0,1.25fr)_minmax(0,0.75fr)_96px]"
 
 function OrdersSkeleton() {
   return (
     <div className="divide-y divide-border">
-      <div className="grid grid-cols-[minmax(0,1.7fr)_minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,0.9fr)_minmax(0,0.8fr)_110px] gap-4 px-5 py-3">
-        {Array.from({ length: 6 }).map((_, index) => (
+      <div className={`grid ${ORDER_GRID} gap-4 px-5 py-3`}>
+        {Array.from({ length: 7 }).map((_, index) => (
           <Skeleton key={index} className="h-3 w-full" />
         ))}
       </div>
       {Array.from({ length: 5 }).map((_, index) => (
         <div key={index} className="space-y-3 px-5 py-4">
-          <div className="grid grid-cols-[minmax(0,1.7fr)_minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,0.9fr)_minmax(0,0.8fr)_110px] gap-4">
-            {Array.from({ length: 6 }).map((__, col) => (
+          <div className={`grid ${ORDER_GRID} gap-4`}>
+            {Array.from({ length: 7 }).map((__, col) => (
               <Skeleton key={col} className="h-5 w-full" />
             ))}
           </div>
@@ -66,13 +68,67 @@ function executionTime(timestamp: number) {
   return `${Math.floor(hours / 24)}d ago`
 }
 
-function executionStatusLabel(status: string) {
-  return status === "failed" ? "Failed" : "Executed"
+function executionStatusLabel(execution: {
+  status: string
+  fillStatus?: "filled" | "no_fill" | "amount_unavailable"
+}) {
+  if (execution.status === "failed") {
+    return "Failed"
+  }
+  if (execution.fillStatus === "filled") {
+    return "Filled"
+  }
+  if (execution.fillStatus === "no_fill") {
+    return "No fill"
+  }
+  return "Amount unavailable"
+}
+
+function executionStatusClass(execution: {
+  status: string
+  fillStatus?: "filled" | "no_fill" | "amount_unavailable"
+}) {
+  if (execution.status === "failed") {
+    return "border-destructive/30 bg-destructive/10 font-medium text-destructive"
+  }
+  if (execution.fillStatus === "filled") {
+    return "border-emerald-500/25 bg-emerald-500/10 font-medium text-emerald-400"
+  }
+  if (execution.fillStatus === "no_fill") {
+    return "border-amber-500/25 bg-amber-500/10 font-medium text-amber-400"
+  }
+  return "border-border bg-background/60 font-medium text-muted-foreground"
+}
+
+function outputSummary(execution: {
+  outputAmount?: string
+  outputAsset?: string
+  outputCoinObjectIds?: string[]
+  residualSuiAmount?: number
+  fillStatus?: "filled" | "no_fill" | "amount_unavailable"
+}) {
+  const parts: string[] = []
+  if (execution.fillStatus === "no_fill") {
+    parts.push("No DEEP filled")
+  } else if (execution.outputAmount) {
+    parts.push(execution.outputAmount)
+  } else if (execution.outputCoinObjectIds?.length) {
+    parts.push("Amount unavailable")
+  } else {
+    parts.push("Amount unavailable")
+  }
+
+  if (typeof execution.residualSuiAmount === "number") {
+    parts.push(`${formatSui(execution.residualSuiAmount)} returned`)
+  }
+
+  return parts
 }
 
 export function OrdersView() {
   const { orders, loading } = useMandateStore()
   const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE)
+  const [expandedOrderId, setExpandedOrderId] = React.useState<string | null>(null)
   const sortedOrders = [...orders].sort((a, b) => b.timestamp - a.timestamp)
   const visibleOrders = sortedOrders.slice(0, visibleCount)
 
@@ -93,20 +149,26 @@ export function OrdersView() {
           <OrdersSkeleton />
         ) : sortedOrders.length > 0 ? (
           <div className="divide-y divide-border">
-            <div className="grid grid-cols-[minmax(0,1.7fr)_minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,0.9fr)_minmax(0,0.8fr)_110px] gap-4 px-5 py-3 text-xs font-medium text-muted-foreground">
+            <div className={`grid ${ORDER_GRID} gap-4 px-5 py-3 text-xs font-medium text-muted-foreground`}>
               <span>Mandate</span>
               <span>Digest</span>
-              <span>Pair / Side</span>
-              <span>Input Amount</span>
+              <span>Market</span>
+              <span>Input</span>
+              <span>Output</span>
               <span>Status</span>
               <span className="text-right">Time</span>
             </div>
-            {visibleOrders.map((execution) => (
+            {visibleOrders.map((execution) => {
+              const outputParts = outputSummary(execution)
+              const outputObjectCount = execution.outputCoinObjectIds?.length ?? 0
+              const expanded = expandedOrderId === execution.id
+
+              return (
               <div
                 key={execution.id}
                 className="px-5 py-4 transition-colors hover:bg-muted/35"
               >
-                <div className="grid grid-cols-[minmax(0,1.7fr)_minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,0.9fr)_minmax(0,0.8fr)_110px] items-start gap-4">
+                <div className={`grid ${ORDER_GRID} items-start gap-4`}>
                   <div className="min-w-0">
                     <div className="flex min-w-0 flex-col gap-1">
                       <span className="font-medium">
@@ -134,7 +196,7 @@ export function OrdersView() {
                     <div className="flex flex-col gap-0.5">
                       <span className="font-medium">{DEEPBOOK_PAIR}</span>
                       <span className="text-xs text-muted-foreground">
-                        {execution.side ?? DEEPBOOK_SIDE} DEEP with SUI
+                        {execution.side ?? DEEPBOOK_SIDE}
                       </span>
                     </div>
                   </div>
@@ -145,25 +207,35 @@ export function OrdersView() {
                           ? formatSui(execution.amountSui)
                           : "0.001 SUI"}
                       </span>
-                      <span className="text-xs text-muted-foreground">
-                        Input
+                    </div>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 flex-col gap-0.5">
+                      <span className="truncate text-sm font-medium">
+                        {outputParts[0]}
+                      </span>
+                      <span className="truncate text-xs text-muted-foreground">
+                        {outputParts.slice(1).join(" · ") ||
+                          (outputObjectCount
+                            ? `${outputObjectCount} object${outputObjectCount === 1 ? "" : "s"}`
+                            : "Output details unavailable")}
                       </span>
                     </div>
                   </div>
                   <div className="min-w-0">
                     <Badge
                       variant="outline"
-                      className={
-                        execution.status === "failed"
-                          ? "border-destructive/30 bg-destructive/10 font-medium text-destructive"
-                          : "border-emerald-500/25 bg-emerald-500/10 font-medium text-emerald-400"
-                      }
+                      className={executionStatusClass(execution)}
                     >
-                      {executionStatusLabel(execution.status)}
+                      {executionStatusLabel(execution)}
                     </Badge>
                     {execution.status !== "failed" && (
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Swap executed
+                        {execution.fillStatus === "filled"
+                          ? "Swap filled"
+                          : execution.fillStatus === "no_fill"
+                            ? "No DEEP filled"
+                            : "Amount unavailable"}
                       </p>
                     )}
                   </div>
@@ -172,7 +244,6 @@ export function OrdersView() {
                   </div>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                  <span>Protocol: {execution.protocol}</span>
                   <span className="inline-flex min-w-0 items-center gap-1">
                     Pool:
                     <CopyableId
@@ -184,6 +255,15 @@ export function OrdersView() {
                       label="View DeepBook pool on Suivision"
                     />
                   </span>
+                  {execution.outputOwner ? (
+                    <span className="inline-flex min-w-0 items-center gap-1">
+                      Owner:
+                      <CopyableId
+                        value={execution.outputOwner}
+                        label="output owner"
+                      />
+                    </span>
+                  ) : null}
                   <span>
                     Gas Fee:{" "}
                     <span className="font-mono">
@@ -192,9 +272,41 @@ export function OrdersView() {
                         : "-"}
                     </span>
                   </span>
+                  <span>Output objects: {outputObjectCount || "-"}</span>
+                  {outputObjectCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedOrderId(expanded ? null : execution.id)
+                      }
+                      className="text-cyan-300 hover:text-cyan-200"
+                    >
+                      {expanded ? "Hide details" : "Details"}
+                    </button>
+                  )}
                 </div>
+                {expanded && execution.outputCoinObjectIds?.length ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-background/45 px-3 py-2 text-xs text-muted-foreground">
+                    <span>Output object ids:</span>
+                    {execution.outputCoinObjectIds.map((objectId) => (
+                      <span
+                        key={objectId}
+                        className="inline-flex min-w-0 items-center gap-1"
+                      >
+                        <CopyableId
+                          value={objectId}
+                          label="output coin object id"
+                        />
+                        <ExplorerLink
+                          objectId={objectId}
+                          label="View output coin on Suivision"
+                        />
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
               </div>
-            ))}
+            )})}
             {visibleCount < sortedOrders.length && (
               <div className="border-t border-border py-4 text-center">
                 <Button

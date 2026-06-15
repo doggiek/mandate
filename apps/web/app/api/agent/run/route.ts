@@ -25,6 +25,13 @@ type AgentRunResult = {
   deepBookPoolMutationFound: boolean
   balanceChangeSui: string
   gasFeeSui: string
+  outputAsset?: string
+  outputCoinType?: string
+  outputAmount?: string
+  residualSui?: string
+  outputCoinObjectIds?: string[]
+  outputOwner?: string
+  fillStatus?: "filled" | "no_fill" | "amount_unavailable"
   blockedReason?: string
   error?: string
 }
@@ -283,6 +290,17 @@ function parseAgentOutput(output: string, error?: string): AgentRunResult {
   const blockedReasonText = readSection(output, "Blocked Reason")
   const errorText = error ?? readSection(output, "Failure Reason")
   const blockedReason = classifyBlockedReason(errorText)
+  const outputCoinObjects = readSection(output, "Output Coin Objects")
+  const outputCoinObjectIds =
+    outputCoinObjects && outputCoinObjects !== "-"
+      ? outputCoinObjects.split(",").map((id) => id.trim()).filter(Boolean)
+      : []
+  const outputAsset = readSection(output, "Output Asset")
+  const outputCoinType = readSection(output, "Output Coin Type")
+  const outputAmount = readSection(output, "Output Amount")
+  const residualSui = readSection(output, "Residual SUI")
+  const outputOwner = readSection(output, "Output Owner")
+  const fillStatus = readSection(output, "Fill Status")
   return {
     digest: readSection(output, "Digest"),
     status:
@@ -298,6 +316,17 @@ function parseAgentOutput(output: string, error?: string): AgentRunResult {
       readSection(output, "DeepBook Pool Mutation") === "FOUND",
     balanceChangeSui: readSection(output, "Balance Change") || "0 SUI",
     gasFeeSui: readSection(output, "Gas Fee") || "-",
+    ...(outputAsset && outputAsset !== "-" ? { outputAsset } : {}),
+    ...(outputCoinType && outputCoinType !== "-" ? { outputCoinType } : {}),
+    ...(outputAmount && outputAmount !== "-" ? { outputAmount } : {}),
+    ...(residualSui && residualSui !== "-" ? { residualSui } : {}),
+    ...(outputCoinObjectIds.length > 0 ? { outputCoinObjectIds } : {}),
+    ...(outputOwner && outputOwner !== "-" ? { outputOwner } : {}),
+    ...(fillStatus === "filled" ||
+    fillStatus === "no_fill" ||
+    fillStatus === "amount_unavailable"
+      ? { fillStatus }
+      : {}),
     ...(blockedReasonText || blockedReason
       ? { blockedReason: blockedReasonText || blockedReason }
       : {}),

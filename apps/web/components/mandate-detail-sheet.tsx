@@ -19,6 +19,7 @@ import {
 import { ActivityFeed } from "@/components/activity-feed"
 import { BudgetMeter } from "@/components/budget-meter"
 import { CopyableId } from "@/components/copyable-id"
+import { ExplorerLink } from "@/components/explorer-link"
 import { StatusBadge } from "@/components/status-badges"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -33,6 +34,7 @@ import {
 import { Separator } from "@/components/ui/separator"
 import {
   CLOCK_OBJECT_ID,
+  DEEPBOOK_POOL_ID,
   DEEPBOOK_POOL_KEY,
   isCurrentMandateObjectType,
   NETWORK,
@@ -66,6 +68,54 @@ function executionTime(timestamp: number) {
   }
 
   return `${Math.floor(hours / 24)}d ago`
+}
+
+function executionOutputSummary(execution: {
+  outputAmount?: string
+  outputAsset?: string
+  outputCoinObjectIds?: string[]
+  residualSuiAmount?: number
+  fillStatus?: "filled" | "no_fill" | "amount_unavailable"
+}) {
+  if (execution.fillStatus === "no_fill") {
+    return "No DEEP filled"
+  }
+  if (execution.outputAmount) {
+    return execution.outputAmount
+  }
+  return "Amount unavailable"
+}
+
+function executionFillLabel(execution: {
+  status: string
+  fillStatus?: "filled" | "no_fill" | "amount_unavailable"
+}) {
+  if (execution.status === "failed") {
+    return "Failed"
+  }
+  if (execution.fillStatus === "filled") {
+    return "Filled"
+  }
+  if (execution.fillStatus === "no_fill") {
+    return "No fill"
+  }
+  return "Amount unavailable"
+}
+
+function executionFillClass(execution: {
+  status: string
+  fillStatus?: "filled" | "no_fill" | "amount_unavailable"
+}) {
+  if (execution.status === "failed") {
+    return "border-destructive/30 bg-destructive/10 text-destructive"
+  }
+  if (execution.fillStatus === "filled") {
+    return "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
+  }
+  if (execution.fillStatus === "no_fill") {
+    return "border-amber-500/25 bg-amber-500/10 text-amber-400"
+  }
+  return "border-border bg-background/60 text-muted-foreground"
 }
 
 function getErrorMessage(error: unknown) {
@@ -505,15 +555,9 @@ export function MandateDetailSheet({
                             />
                             <Badge
                               variant="outline"
-                              className={
-                                execution.status === "failed"
-                                  ? "border-destructive/30 bg-destructive/10 text-destructive"
-                                  : "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
-                              }
+                              className={executionFillClass(execution)}
                             >
-                              {execution.status === "failed"
-                                ? "Failed"
-                                : "Executed"}
+                              {executionFillLabel(execution)}
                             </Badge>
                           </div>
                           <p className="mt-1 text-xs text-muted-foreground">
@@ -524,6 +568,47 @@ export function MandateDetailSheet({
                               : "0.001 SUI input"}{" "}
                             · {executionTime(execution.timestamp)}
                           </p>
+                          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                            <span>
+                              Input:{" "}
+                              {typeof execution.amountSui === "number"
+                                ? formatSui(execution.amountSui)
+                                : "0.001 SUI"}
+                            </span>
+                            <span>
+                              Output: {executionOutputSummary(execution)}
+                            </span>
+                            {typeof execution.residualSuiAmount === "number" && (
+                              <span>
+                                Residual: {formatSui(execution.residualSuiAmount)}
+                              </span>
+                            )}
+                            {execution.outputCoinObjectIds?.length ? (
+                              <span>
+                                Output objects: {execution.outputCoinObjectIds.length}
+                              </span>
+                            ) : null}
+                            {execution.outputOwner && (
+                              <span className="inline-flex items-center gap-1">
+                                Owner:
+                                <CopyableId
+                                  value={execution.outputOwner}
+                                  label="output owner"
+                                />
+                              </span>
+                            )}
+                            <span className="inline-flex items-center gap-1">
+                              Pool:
+                              <CopyableId
+                                value={DEEPBOOK_POOL_ID}
+                                label="DeepBook pool object id"
+                              />
+                              <ExplorerLink
+                                objectId={DEEPBOOK_POOL_ID}
+                                label="View DeepBook pool on Suivision"
+                              />
+                            </span>
+                          </div>
                         </div>
                         <div className="flex flex-col items-end gap-1">
                           <span className="text-[11px] text-muted-foreground">

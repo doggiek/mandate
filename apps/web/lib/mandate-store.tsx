@@ -15,6 +15,7 @@ import {
   type ActivityEvent,
   type DeepBookOrder,
   type ExecutionStatus,
+  type FillStatus,
   type Mandate,
   type Protocol,
 } from "@/lib/mandate-data"
@@ -71,6 +72,13 @@ type StoreContextValue = {
     amountSui?: number
     suiBalanceChange?: number
     gasFeeSui?: number
+    outputCoinObjectIds?: string[]
+    outputOwner?: string
+    outputAsset?: string
+    outputAmount?: string
+    outputCoinType?: string
+    residualSuiAmount?: number
+    fillStatus?: FillStatus
     pair?: string
     side?: "Buy" | "Sell"
   }) => void
@@ -323,6 +331,151 @@ function gasFeeSuiFromTransaction(tx?: SuiTransactionBlockResponse) {
   return Number(gasMist) / 1_000_000_000
 }
 
+function formatDeepBaseUnits(amount: string | undefined) {
+  if (!amount) {
+    return undefined
+  }
+
+  const value = BigInt(amount)
+  if (value <= BigInt(0)) {
+    return undefined
+  }
+
+  const decimals = BigInt(1_000_000)
+  const whole = value / decimals
+  const fractional = (value % decimals)
+    .toString()
+    .padStart(6, "0")
+    .replace(/0+$/, "")
+  return `${whole.toString()}${fractional ? `.${fractional}` : ""} DEEP`
+}
+
+function deriveFillStatus({
+  outputAmount,
+  outputCoinObjectIds,
+  residualSuiAmount,
+  inputAmountSui,
+}: {
+  outputAmount?: string
+  outputCoinObjectIds?: string[]
+  residualSuiAmount?: number
+  inputAmountSui?: number
+}): FillStatus {
+  if (outputAmount) {
+    return "filled"
+  }
+
+  if (
+    typeof inputAmountSui === "number" &&
+    typeof residualSuiAmount === "number" &&
+    residualSuiAmount >= inputAmountSui
+  ) {
+    return "no_fill"
+  }
+
+  if (outputCoinObjectIds?.length) {
+    return "amount_unavailable"
+  }
+
+  return "no_fill"
+}
+
+function objectOwnerAddress(owner: unknown) {
+  if (typeof owner === "string") {
+    return owner
+  }
+  if (owner && typeof owner === "object" && "AddressOwner" in owner) {
+    const address = (owner as { AddressOwner?: unknown }).AddressOwner
+    return typeof address === "string" ? address : undefined
+  }
+  return undefined
+}
+
+function isSuiCoinObjectType(objectType?: string) {
+  return Boolean(
+    objectType?.includes("::coin::Coin<") && objectType.includes("::sui::SUI")
+  )
+}
+
+function isSuiCoinType(coinType?: string) {
+  return Boolean(coinType?.includes("::sui::SUI"))
+}
+
+function ownerPositiveBalanceChange(
+  tx: SuiTransactionBlockResponse | undefined,
+  ownerAddress: string | undefined,
+  predicate: (coinType?: string) => boolean
+) {
+  if (!ownerAddress) {
+    return undefined
+  }
+
+  const balanceChanges = (tx as { balanceChanges?: Array<{
+    owner?: unknown
+    coinType?: string
+    amount?: string
+  }> } | undefined)?.balanceChanges
+  const total = (balanceChanges ?? [])
+    .filter((change) => {
+      const owner = objectOwnerAddress(change.owner)
+      return (
+        Boolean(owner) &&
+        owner?.toLowerCase() === ownerAddress.toLowerCase() &&
+        predicate(change.coinType)
+      )
+    })
+    .reduce((sum, change) => sum + BigInt(change.amount ?? "0"), BigInt(0))
+
+  return total > BigInt(0) ? total.toString() : undefined
+}
+
+function swapOutputFromTransaction(
+  tx: SuiTransactionBlockResponse | undefined,
+  ownerAddress?: string
+) {
+  const objectChanges = (tx as { objectChanges?: Array<{
+    type?: string
+    objectType?: string
+    objectId?: string
+    owner?: unknown
+  }> } | undefined)?.objectChanges
+
+  const outputObjects = (objectChanges ?? [])
+    .filter((change) => {
+      const owner = objectOwnerAddress(change.owner)
+      return (
+        change.type === "created" &&
+        Boolean(change.objectId) &&
+        change.objectType?.includes("::coin::Coin<") &&
+        !isSuiCoinObjectType(change.objectType) &&
+        (!ownerAddress ||
+          (owner && owner.toLowerCase() === ownerAddress.toLowerCase()))
+      )
+    })
+  const inferredOwner = ownerAddress ?? objectOwnerAddress(outputObjects[0]?.owner)
+  const outputCoinObjectIds = outputObjects.map((change) => change.objectId!)
+
+  const residualSuiMist = ownerPositiveBalanceChange(tx, inferredOwner, isSuiCoinType)
+
+  const outputAmount = formatDeepBaseUnits(
+    ownerPositiveBalanceChange(
+      tx,
+      inferredOwner,
+      (coinType) => Boolean(coinType && !isSuiCoinType(coinType))
+    )
+  )
+  const residualSuiAmount = residualSuiMist ? mistToSui(residualSuiMist) : undefined
+
+  return {
+    outputCoinObjectIds,
+    outputOwner: outputCoinObjectIds.length > 0 ? inferredOwner : undefined,
+    outputAsset: outputCoinObjectIds.length > 0 ? "DEEP" : undefined,
+    outputCoinType: outputObjects[0]?.objectType,
+    outputAmount,
+    residualSuiAmount,
+  }
+}
+
 function mapEventToActivity(
   event: SuiEvent,
   tx?: SuiTransactionBlockResponse
@@ -345,6 +498,13 @@ function mapEventToActivity(
     parsed.amount ?? parsed.attempted_amount ?? parsed.budget_ceiling ?? 0
   )
   const gasFeeSui = gasFeeSuiFromTransaction(tx)
+  const swapOutput = swapOutputFromTransaction(tx)
+  const fillStatus = deriveFillStatus({
+    outputAmount: swapOutput.outputAmount,
+    outputCoinObjectIds: swapOutput.outputCoinObjectIds,
+    residualSuiAmount: swapOutput.residualSuiAmount,
+    inputAmountSui: amountSui,
+  })
   const base = {
     id: `${digest}:${event.type}:${mandateId}`,
     mandateId,
@@ -355,6 +515,17 @@ function mapEventToActivity(
     digest,
     timeDisplay: displayTimeFromMs(activityTimestampMs),
     ...(typeof gasFeeSui === "number" ? { gasFeeSui } : {}),
+    ...(swapOutput.outputCoinObjectIds.length > 0
+      ? {
+          outputCoinObjectIds: swapOutput.outputCoinObjectIds,
+          outputAsset: swapOutput.outputAsset,
+          outputOwner: swapOutput.outputOwner,
+          outputAmount: swapOutput.outputAmount,
+          residualSuiAmount: swapOutput.residualSuiAmount,
+          outputCoinType: swapOutput.outputCoinType,
+          fillStatus,
+        }
+      : {}),
   }
 
   if (event.type.endsWith("CreatedEvent")) {
@@ -467,6 +638,15 @@ function activityToExecution(
   }
 
   const timestamp = new Date(event.timestamp).getTime()
+  const amountSui = event.amountSui ?? event.amount
+  const fillStatus =
+    event.fillStatus ??
+    deriveFillStatus({
+      outputAmount: event.outputAmount,
+      outputCoinObjectIds: event.outputCoinObjectIds,
+      residualSuiAmount: event.residualSuiAmount,
+      inputAmountSui: amountSui,
+    })
   return {
     id: `${event.digest}:${event.mandateId}`,
     mandateId: event.mandateId,
@@ -476,9 +656,18 @@ function activityToExecution(
     protocol: "DeepBook",
     pair: DEEPBOOK_POOL_KEY,
     side: "Buy",
-    amountSui: event.amountSui ?? event.amount,
+    amountSui,
     status: "executed",
     gasFeeSui: event.gasFeeSui,
+    outputCoinObjectIds: event.outputCoinObjectIds,
+    outputOwner: event.outputCoinObjectIds?.length
+      ? event.outputOwner ?? mandate?.ownerAddress
+      : undefined,
+    outputAsset: event.outputAsset,
+    outputAmount: event.outputAmount,
+    residualSuiAmount: event.residualSuiAmount,
+    outputCoinType: event.outputCoinType,
+    fillStatus,
   }
 }
 
@@ -945,6 +1134,13 @@ export function MandateStoreProvider({
       amountSui = 0.001,
       suiBalanceChange,
       gasFeeSui,
+      outputCoinObjectIds,
+      outputOwner,
+      outputAsset,
+      outputAmount,
+      outputCoinType,
+      residualSuiAmount,
+      fillStatus,
       pair = DEEPBOOK_POOL_KEY,
       side = "Buy",
     }: {
@@ -953,6 +1149,13 @@ export function MandateStoreProvider({
       amountSui?: number
       suiBalanceChange?: number
       gasFeeSui?: number
+      outputCoinObjectIds?: string[]
+      outputOwner?: string
+      outputAsset?: string
+      outputAmount?: string
+      outputCoinType?: string
+      residualSuiAmount?: number
+      fillStatus?: FillStatus
       pair?: string
       side?: "Buy" | "Sell"
     }) => {
@@ -992,6 +1195,13 @@ export function MandateStoreProvider({
         title: "Agent executed DeepBook PTB",
         status: "success",
         timeDisplay: "syncing",
+        outputCoinObjectIds,
+        outputOwner,
+        outputAsset,
+        outputAmount,
+        outputCoinType,
+        residualSuiAmount,
+        fillStatus,
       }
 
       setRpcActivity((prev) => uniqActivity([executionActivity, ...prev]))
@@ -1014,6 +1224,20 @@ export function MandateStoreProvider({
         status: "executed",
         ...(typeof suiBalanceChange === "number" ? { suiBalanceChange } : {}),
         ...(typeof gasFeeSui === "number" ? { gasFeeSui } : {}),
+        ...(outputCoinObjectIds?.length ? { outputCoinObjectIds } : {}),
+        ...(outputOwner ? { outputOwner } : {}),
+        ...(outputAsset ? { outputAsset } : {}),
+        ...(outputAmount ? { outputAmount } : {}),
+        ...(outputCoinType ? { outputCoinType } : {}),
+        ...(typeof residualSuiAmount === "number" ? { residualSuiAmount } : {}),
+        fillStatus:
+          fillStatus ??
+          deriveFillStatus({
+            outputAmount,
+            outputCoinObjectIds,
+            residualSuiAmount,
+            inputAmountSui: amountSui,
+          }),
       }
 
       setExecutionHistory((prev) => {
@@ -1157,6 +1381,14 @@ export function MandateStoreProvider({
           side: execution.side ?? "Buy",
           amountSui: execution.amountSui ?? 0.001,
           status,
+          fillStatus:
+            execution.fillStatus ??
+            deriveFillStatus({
+              outputAmount: execution.outputAmount,
+              outputCoinObjectIds: execution.outputCoinObjectIds,
+              residualSuiAmount: execution.residualSuiAmount,
+              inputAmountSui: execution.amountSui ?? 0.001,
+            }),
           mandateLabel:
             mandateById.get(execution.mandateId)?.label ?? execution.mandateLabel,
         }

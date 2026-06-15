@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
   Card,
   CardAction,
@@ -62,6 +63,9 @@ function statusDot(status: MandateStatus) {
 }
 
 export function ActivityView() {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
   const { activity, mandates, loading, error, isWalletScoped } = useMandateStore()
   const [kind, setKind] = React.useState<string>("all")
   const [mandateId, setMandateId] = React.useState("all")
@@ -70,6 +74,7 @@ export function ActivityView() {
   const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE)
 
   const selectedMandate = mandates.find((mandate) => mandate.id === mandateId)
+  const queryMandateId = searchParams.get("mandateId")
   const mandateOptions = React.useMemo(() => {
     const query = mandateQuery.trim().toLowerCase()
     return mandates.filter((mandate) => {
@@ -100,6 +105,24 @@ export function ActivityView() {
     setVisibleCount(PAGE_SIZE)
   }, [kind, mandateId])
 
+  React.useEffect(() => {
+    if (!queryMandateId) {
+      return
+    }
+    if (!mandates.some((mandate) => mandate.id === queryMandateId)) {
+      return
+    }
+    setMandateId(queryMandateId)
+  }, [mandates, queryMandateId])
+
+  const clearMandateFilter = React.useCallback(() => {
+    setMandateId("all")
+    setMandateQuery("")
+    if (searchParams.get("mandateId")) {
+      router.replace(pathname)
+    }
+  }, [pathname, router, searchParams])
+
   return (
     <Card>
       <CardHeader className="border-b border-border">
@@ -127,10 +150,7 @@ export function ActivityView() {
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={() => {
-                  setMandateId("all")
-                  setMandateQuery("")
-                }}
+                onClick={clearMandateFilter}
               >
                 Clear
               </Button>
@@ -152,6 +172,9 @@ export function ActivityView() {
                         setMandateId(mandate.id)
                         setMandateOpen(false)
                         setMandateQuery("")
+                        router.replace(
+                          `${pathname}?mandateId=${encodeURIComponent(mandate.id)}`
+                        )
                       }}
                       className={cn(
                         "flex w-full items-start gap-2 rounded-md px-2 py-2 text-left hover:bg-accent",
@@ -200,6 +223,15 @@ export function ActivityView() {
         </CardAction>
       </CardHeader>
       <CardContent className="py-0">
+        {selectedMandate && (
+          <div className="border-b border-border py-3 text-xs text-muted-foreground">
+            Showing activity for{" "}
+            <span className="font-medium text-foreground">
+              {selectedMandate.label}
+            </span>{" "}
+            <span className="font-mono">({shortId(selectedMandate.id)})</span>
+          </div>
+        )}
         {loading ? (
           <ActivityListSkeleton />
         ) : error ? (

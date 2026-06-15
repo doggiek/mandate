@@ -63,10 +63,18 @@ export type ActivityEvent = {
   amountSui?: number
   timeDisplay?: string
   gasFeeSui?: number
+  outputCoinObjectIds?: string[]
+  outputOwner?: string
+  outputAsset?: string
+  outputAmount?: string
+  residualSuiAmount?: number
+  outputCoinType?: string
+  fillStatus?: FillStatus
 }
 
 export type ExecutionSide = "Buy" | "Sell"
 export type ExecutionStatus = "executed" | "success" | "failed"
+export type FillStatus = "filled" | "no_fill" | "amount_unavailable"
 
 export type DeepBookOrder = {
   id: string
@@ -81,6 +89,13 @@ export type DeepBookOrder = {
   status: ExecutionStatus
   suiBalanceChange?: number
   gasFeeSui?: number
+  outputCoinObjectIds?: string[]
+  outputOwner?: string
+  outputAsset?: string
+  outputCoinType?: string
+  outputAmount?: string
+  residualSuiAmount?: number
+  fillStatus?: FillStatus
 }
 
 export const AGENTS: Agent[] = [

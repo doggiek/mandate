@@ -6,7 +6,9 @@ build/
 .next/
 apps/web/node_modules/
 apps/web/.next/
+apps/web/tsconfig.tsbuildinfo
 contracts/build/
 contracts/Published.toml.bak
 contracts/deployments/testnet/*.json
 !contracts/deployments/testnet/.gitkeep
+.DS_Store

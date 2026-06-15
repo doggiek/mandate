@@ -143,6 +143,7 @@ export async function getTransactionDetails(
       showBalanceChanges: true,
       showEffects: true,
       showEvents: true,
+      showObjectChanges: true,
     },
   })
 }

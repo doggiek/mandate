@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
 import { AlertCircle, Play, RotateCcw } from "lucide-react"
 import { useCurrentAccount } from "@mysten/dapp-kit"
 
@@ -13,6 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { ActivityFeed } from "@/components/activity-feed"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -34,6 +36,7 @@ import {
   BACKEND_AGENT_ADDRESS,
 } from "@/lib/chain-config"
 import { formatSui, stableExpiryLabel } from "@/lib/format"
+import { sortActivitiesByTimeDesc } from "@/lib/activity-utils"
 import { useMandateStore } from "@/lib/mandate-store"
 import {
   SIGNAL_STRATEGIES,
@@ -50,6 +53,13 @@ type AgentRunResult = {
   deepBookPoolMutationFound: boolean
   balanceChangeSui: string
   gasFeeSui: string
+  outputAsset?: string
+  outputCoinType?: string
+  outputAmount?: string
+  residualSui?: string
+  outputCoinObjectIds?: string[]
+  outputOwner?: string
+  fillStatus?: "filled" | "no_fill" | "amount_unavailable"
   timestampMs?: number
   blockedReason?: string
   error?: string
@@ -80,21 +90,15 @@ type LastRunReceipt = {
 type AutoRunStatus = "off" | "running" | "stopped" | "error"
 type AutoRunInterval = "off" | "30000" | "60000" | "300000"
 type ExecutionMode = "test_only" | "auto_execute"
-type RecentExecution = {
-  id: string
-  timeMs: number
-  status: AgentRunResult["status"]
-  digest: string
-  amountSui: number
-}
 type AutomationSessionState = {
   selectedMandateId: string | null
   autoInterval: AutoRunInterval
   executionMode: ExecutionMode
   signalStrategyId: string
-  autoStrategy: StrategyKey
   signalDirection: SignalDirection
   signalThresholdPct: string
+  executionAmountSui: string
+  executionAsset: "SUI"
   running: boolean
 }
 type SignalStatus = {
@@ -118,40 +122,8 @@ let lastRunReceipt: LastRunReceipt = {
 }
 
 const AUTOMATION_SESSION_PREFIX = "mandate:automation-session:v1"
-const AUTOMATION_RECENT_EXECUTIONS_PREFIX =
-  "mandate:automation-recent-executions:v1"
 const AUTOMATION_SELECTED_MANDATE_PREFIX =
   "mandate:automation-selected-mandate:v1"
-
-const STRATEGIES: Record<
-  StrategyKey,
-  {
-    label: string
-    description: string
-    expectation: string
-  }
-> = {
-  normal: {
-    label: "Normal order",
-    description: "Swap 0.001 SUI via DeepBook.",
-    expectation: "Executed",
-  },
-  exceed_per_tx: {
-    label: "Per-tx guard",
-    description: "Block amount above max tx.",
-    expectation: "Blocked",
-  },
-  exceed_budget: {
-    label: "Budget guard",
-    description: "Block amount above remaining budget.",
-    expectation: "Blocked",
-  },
-  revoked_expired: {
-    label: "Inactive guard",
-    description: "Block revoked or expired mandates.",
-    expectation: "Blocked",
-  },
-}
 
 const AGENT_MISMATCH_MESSAGE =
   "Agent wallet mismatch. The selected mandate must authorize the backend Trading Agent wallet."
@@ -175,6 +147,8 @@ const SIGNAL_DIRECTIONS: Array<{ label: string; value: SignalDirection }> = [
   { label: "Down", value: "down" },
   { label: "Either", value: "either" },
 ]
+
+const EXECUTION_ASSETS = [{ label: "SUI", value: "SUI" as const }]
 
 const EXECUTION_MODES: Array<{ label: string; value: ExecutionMode }> = [
   { label: "Test only", value: "test_only" },
@@ -292,24 +266,32 @@ function parseSuiAmount(value: string) {
   return match ? Number(match[1]) : undefined
 }
 
-function strategyAmount(strategy: StrategyKey, mandate?: {
-  budget: number
-  spent: number
-  txLimit: number
-}) {
+function parseExecutionAmount(value: string) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+}
+
+function deriveStrategyFromPolicy(
+  mandate: { status: "active" | "expired" | "revoked"; budget: number; spent: number; txLimit: number } | undefined,
+  amountSui: number
+): StrategyKey {
   if (!mandate) {
-    return 0.001
+    return "normal"
   }
 
-  const remaining = Math.max(mandate.budget - mandate.spent, 0)
-  if (strategy === "exceed_per_tx") {
-    return Number((mandate.txLimit + 0.001).toFixed(6))
-  }
-  if (strategy === "exceed_budget") {
-    return Number((remaining + 0.001).toFixed(6))
+  if (mandate.status !== "active") {
+    return "revoked_expired"
   }
 
-  return 0.001
+  if (amountSui > mandate.txLimit) {
+    return "exceed_per_tx"
+  }
+
+  if (amountSui > Math.max(mandate.budget - mandate.spent, 0)) {
+    return "exceed_budget"
+  }
+
+  return "normal"
 }
 
 function strategyBlockedReason(reason?: string) {
@@ -452,18 +434,6 @@ function scopedStorageKey(prefix: string, scope: string) {
   return `${prefix}:${scope}`
 }
 
-function executionTimeLabel(timestampMs: number) {
-  if (!timestampMs) {
-    return "-"
-  }
-
-  return new Intl.DateTimeFormat("en", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(timestampMs)
-}
-
 function formatCountdown(nextRunAt: number | null, nowMs: number) {
   if (!nextRunAt) {
     return "-"
@@ -477,6 +447,7 @@ export function AgentExecutionPanel() {
   const account = useCurrentAccount()
   const {
     mandates,
+    activity,
     loading,
     isWalletScoped,
     refreshMandates,
@@ -486,12 +457,10 @@ export function AgentExecutionPanel() {
   const [result, setResult] = React.useState<AgentRunResult | null>(null)
   const [isRunning, setIsRunning] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
-  const [strategy, setStrategy] = React.useState<StrategyKey>("normal")
   const [selectedMandateId, setSelectedMandateId] = React.useState<string | null>(
     null
   )
   const [runContext, setRunContext] = React.useState<RunContext | null>(null)
-  const [autoStrategy, setAutoStrategy] = React.useState<StrategyKey>("normal")
   const [autoInterval, setAutoInterval] =
     React.useState<AutoRunInterval>("off")
   const [signalStrategyId, setSignalStrategyId] = React.useState(
@@ -504,6 +473,8 @@ export function AgentExecutionPanel() {
   )
   const [executionMode, setExecutionMode] =
     React.useState<ExecutionMode>("test_only")
+  const [executionAmountSui, setExecutionAmountSui] = React.useState("0.001")
+  const [executionAsset, setExecutionAsset] = React.useState<"SUI">("SUI")
   const [forceSignalTriggered, setForceSignalTriggered] = React.useState(false)
   const [liveSignal, setLiveSignal] = React.useState<SignalStatus | null>(null)
   const [isCheckingSignal, setIsCheckingSignal] = React.useState(false)
@@ -514,9 +485,6 @@ export function AgentExecutionPanel() {
   const [autoStartedAt, setAutoStartedAt] = React.useState<number | null>(null)
   const [autoLastDigest, setAutoLastDigest] = React.useState<string | null>(null)
   const [autoNextRunAt, setAutoNextRunAt] = React.useState<number | null>(null)
-  const [recentExecutions, setRecentExecutions] = React.useState<
-    RecentExecution[]
-  >([])
   const [nowMs, setNowMs] = React.useState(() => Date.now())
   const autoTimerRef = React.useRef<number | null>(null)
   const autoInFlightRef = React.useRef(false)
@@ -626,6 +594,15 @@ export function AgentExecutionPanel() {
       selectableMandates.find((mandate) => mandate.id === selectedMandateId),
     [selectableMandates, selectedMandateId]
   )
+  const selectedMandateActivity = React.useMemo(() => {
+    if (!selectedMandate?.id) {
+      return []
+    }
+
+    return sortActivitiesByTimeDesc(
+      activity.filter((event) => event.mandateId === selectedMandate.id)
+    ).slice(0, 5)
+  }, [activity, selectedMandate?.id])
   const automationScope = React.useMemo(() => {
     const ownerAddress = account?.address
     if (!ownerAddress || !PACKAGE_ID || !selectedMandate?.id) {
@@ -688,6 +665,23 @@ export function AgentExecutionPanel() {
   const remainingBudget = selectedMandate
     ? Math.max(selectedMandate.budget - selectedMandate.spent, 0)
     : 0
+  const actionAmountSui = React.useMemo(
+    () => parseExecutionAmount(executionAmountSui),
+    [executionAmountSui]
+  )
+  const actionAmountValid = actionAmountSui > 0
+  const policyStrategy = React.useMemo(
+    () => deriveStrategyFromPolicy(selectedMandate, actionAmountSui),
+    [actionAmountSui, selectedMandate]
+  )
+  const policyChecks = React.useMemo(
+    () => ({
+      maxTx: Boolean(selectedMandate && actionAmountValid && actionAmountSui <= selectedMandate.txLimit),
+      budget: Boolean(selectedMandate && actionAmountValid && actionAmountSui <= remainingBudget),
+      active: selectedMandate?.status === "active",
+    }),
+    [actionAmountSui, actionAmountValid, remainingBudget, selectedMandate]
+  )
   const validateRunStrategy = React.useCallback(
     (runStrategy: StrategyKey) => {
       if (!selectedMandate) {
@@ -719,6 +713,13 @@ export function AgentExecutionPanel() {
         }
       }
 
+      if (!actionAmountValid) {
+        return {
+          ok: false,
+          reason: "Enter a positive execution amount.",
+        }
+      }
+
       if (isStrategyDisabled(runStrategy, selectedMandate)) {
         return {
           ok: false,
@@ -729,13 +730,10 @@ export function AgentExecutionPanel() {
         }
       }
 
-      const amountSui = strategyAmount(runStrategy, selectedMandate)
-      const remainingSui = Math.max(selectedMandate.budget - selectedMandate.spent, 0)
-
-      if (runStrategy === "normal" && amountSui > remainingSui) {
+      if (runStrategy === "normal" && actionAmountSui > remainingBudget) {
         return {
           ok: false,
-          reason: "Mandate budget is insufficient for the selected strategy.",
+          reason: "Mandate budget is insufficient for the configured action.",
         }
       }
 
@@ -744,9 +742,17 @@ export function AgentExecutionPanel() {
         reason: null,
       }
     },
-    [agentWalletMatches, packageAllowed, protocolAllowed, selectedMandate]
+    [
+      actionAmountSui,
+      actionAmountValid,
+      agentWalletMatches,
+      packageAllowed,
+      protocolAllowed,
+      remainingBudget,
+      selectedMandate,
+    ]
   )
-  const canRunAgent = validateRunStrategy(strategy).ok
+  const canRunAgent = validateRunStrategy(policyStrategy).ok
   const thresholdPct = React.useMemo(() => {
     const parsed = Number(signalThresholdPct)
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 5
@@ -756,7 +762,7 @@ export function AgentExecutionPanel() {
     executionMode === "auto_execute" &&
     autoInterval !== "off" &&
     thresholdValid &&
-    validateRunStrategy(autoStrategy).ok
+    validateRunStrategy(policyStrategy).ok
   const showMandateLoading = loading && selectableMandates.length === 0 && !result
 
   const clearRunResult = React.useCallback(() => {
@@ -783,7 +789,6 @@ export function AgentExecutionPanel() {
     setAutoStartedAt(null)
     setAutoLastDigest(null)
     setAutoNextRunAt(null)
-    setRecentExecutions([])
     setLiveSignal(null)
     clearRunResult()
   }, [clearRunResult])
@@ -804,13 +809,6 @@ export function AgentExecutionPanel() {
     loadedScopeRef.current = automationScope
 
     const sessionKey = scopedStorageKey(AUTOMATION_SESSION_PREFIX, automationScope)
-    const recentKey = scopedStorageKey(
-      AUTOMATION_RECENT_EXECUTIONS_PREFIX,
-      automationScope
-    )
-    const savedExecutions = readJsonStorage<RecentExecution[]>(recentKey)
-    setRecentExecutions(savedExecutions?.slice(0, 5) ?? [])
-
     const savedSession = readJsonStorage<AutomationSessionState>(sessionKey)
     if (!savedSession || savedSession.selectedMandateId !== selectedMandate?.id) {
       return
@@ -819,9 +817,10 @@ export function AgentExecutionPanel() {
     setAutoInterval(savedSession.autoInterval)
     setExecutionMode(savedSession.executionMode)
     setSignalStrategyId(savedSession.signalStrategyId)
-    setAutoStrategy(savedSession.autoStrategy)
     setSignalDirection(savedSession.signalDirection)
     setSignalThresholdPct(savedSession.signalThresholdPct)
+    setExecutionAmountSui(savedSession.executionAmountSui ?? "0.001")
+    setExecutionAsset(savedSession.executionAsset ?? "SUI")
 
     if (savedSession.running) {
       setAutoStatus("stopped")
@@ -845,54 +844,25 @@ export function AgentExecutionPanel() {
         autoInterval,
         executionMode,
         signalStrategyId,
-        autoStrategy,
         signalDirection,
         signalThresholdPct,
+        executionAmountSui,
+        executionAsset,
         running: autoStatus === "running",
       }
     )
   }, [
     autoInterval,
     autoStatus,
-    autoStrategy,
     automationScope,
     executionMode,
+    executionAmountSui,
+    executionAsset,
     selectedMandate?.id,
     signalDirection,
     signalStrategyId,
     signalThresholdPct,
   ])
-
-  React.useEffect(() => {
-    if (!automationScope || loadedScopeRef.current !== automationScope) {
-      return
-    }
-
-    writeJsonStorage(
-      scopedStorageKey(AUTOMATION_RECENT_EXECUTIONS_PREFIX, automationScope),
-      recentExecutions
-    )
-  }, [automationScope, recentExecutions])
-
-  React.useEffect(() => {
-    if (
-      selectedMandate &&
-      isStrategyDisabled(strategy, selectedMandate)
-    ) {
-      setStrategy(selectedMandate.status === "active" ? "normal" : "revoked_expired")
-    }
-  }, [selectedMandate, strategy])
-
-  React.useEffect(() => {
-    if (
-      selectedMandate &&
-      isStrategyDisabled(autoStrategy, selectedMandate)
-    ) {
-      setAutoStrategy(
-        selectedMandate.status === "active" ? "normal" : "revoked_expired"
-      )
-    }
-  }, [autoStrategy, selectedMandate])
 
   const stopAutoRun = React.useCallback(
     (status: AutoRunStatus = "stopped", message?: string) => {
@@ -913,11 +883,11 @@ export function AgentExecutionPanel() {
       return
     }
 
-    const validation = validateRunStrategy(autoStrategy)
+    const validation = validateRunStrategy(policyStrategy)
     if (!validation.ok) {
       stopAutoRun("error", validation.reason ?? "Auto Run stopped.")
     }
-  }, [autoStatus, autoStrategy, stopAutoRun, validateRunStrategy])
+  }, [autoStatus, policyStrategy, stopAutoRun, validateRunStrategy])
 
   React.useEffect(() => {
     if (autoStatus === "running" && executionMode !== "auto_execute") {
@@ -940,18 +910,6 @@ export function AgentExecutionPanel() {
     [autoStatus, clearRunResult, selectedMandateId, stopAutoRun]
   )
 
-  const handleStrategyChange = React.useCallback(
-    (value: StrategyKey) => {
-      if (value === strategy) {
-        return
-      }
-
-      setStrategy(value)
-      clearRunResult()
-    },
-    [clearRunResult, strategy]
-  )
-
   const handleSignalStrategyChange = React.useCallback((value: string) => {
     const nextStrategy = signalStrategyById(value)
     if (!nextStrategy || nextStrategy.status !== "available") {
@@ -961,28 +919,23 @@ export function AgentExecutionPanel() {
     setSignalStrategyId(nextStrategy.id)
     setSignalDirection(nextStrategy.direction)
     setSignalThresholdPct(String(nextStrategy.thresholdPct))
+    setExecutionAmountSui(String(nextStrategy.executionAmountSui || 0.001))
     setLiveSignal(null)
   }, [])
+
+  const handleExecutionAmountChange = React.useCallback(
+    (value: string) => {
+      setExecutionAmountSui(value)
+      clearRunResult()
+    },
+    [clearRunResult]
+  )
 
   const scheduleRefresh = React.useCallback(() => {
     window.setTimeout(() => {
       refreshMandates()
     }, 0)
   }, [refreshMandates])
-
-  const appendRecentExecution = React.useCallback(
-    (runResult: AgentRunResult, context: RunContext) => {
-      const item: RecentExecution = {
-        id: `${runResult.digest || "local"}-${Date.now()}`,
-        timeMs: runResult.timestampMs ?? Date.now(),
-        status: runResult.status,
-        digest: runResult.digest,
-        amountSui: context.amountSui,
-      }
-      setRecentExecutions((items) => [item, ...items].slice(0, 5))
-    },
-    []
-  )
 
   const executeAgentRun = React.useCallback(
     async (runStrategy: StrategyKey) => {
@@ -994,7 +947,7 @@ export function AgentExecutionPanel() {
       }
 
       const validation = validateRunStrategy(runStrategy)
-      const amountSui = strategyAmount(runStrategy, selectedMandate)
+      const amountSui = actionAmountSui
       const context: RunContext = {
         mandateId: selectedMandate.id,
         mandateLabel: selectedMandate.label,
@@ -1027,7 +980,6 @@ export function AgentExecutionPanel() {
         }
         setError(failedResult.error ?? null)
         setResult(failedResult)
-        appendRecentExecution(failedResult, context)
         lastRunReceipt = {
           result: failedResult,
           error: failedResult.error ?? null,
@@ -1062,7 +1014,6 @@ export function AgentExecutionPanel() {
         })
         const payload = (await response.json()) as AgentRunResult
         setResult(payload)
-        appendRecentExecution(payload, context)
         lastRunReceipt = {
           result: payload,
           error: null,
@@ -1114,6 +1065,13 @@ export function AgentExecutionPanel() {
           amountSui,
           suiBalanceChange: parseSuiBalanceChange(payload.balanceChangeSui),
           gasFeeSui: parseSuiAmount(payload.gasFeeSui),
+          outputAsset: payload.outputAsset,
+          outputCoinType: payload.outputCoinType,
+          outputAmount: payload.outputAmount,
+          residualSuiAmount: parseSuiAmount(payload.residualSui ?? ""),
+          outputCoinObjectIds: payload.outputCoinObjectIds,
+          outputOwner: payload.outputOwner,
+          fillStatus: payload.fillStatus,
         })
         scheduleRefresh()
         return {
@@ -1136,7 +1094,6 @@ export function AgentExecutionPanel() {
         }
         setError(normalizedError)
         setResult(failedResult)
-        appendRecentExecution(failedResult, context)
         lastRunReceipt = {
           result: failedResult,
           error: normalizedError,
@@ -1154,18 +1111,18 @@ export function AgentExecutionPanel() {
     [
       recordAgentExecution,
       recordBlockedAction,
-      appendRecentExecution,
       remainingBudget,
       scheduleRefresh,
       selectedMandate,
       selectedProtocol,
       validateRunStrategy,
+      actionAmountSui,
     ]
   )
 
   const runAgent = React.useCallback(() => {
-    void executeAgentRun(strategy)
-  }, [executeAgentRun, strategy])
+    void executeAgentRun(policyStrategy)
+  }, [executeAgentRun, policyStrategy])
 
   const checkSignal = React.useCallback(
     async (force?: "triggered") => {
@@ -1199,7 +1156,7 @@ export function AgentExecutionPanel() {
       return
     }
 
-    const validation = validateRunStrategy(autoStrategy)
+    const validation = validateRunStrategy(policyStrategy)
     if (!validation.ok) {
       stopAutoRun("error", validation.reason ?? "Auto Run stopped.")
       return
@@ -1226,7 +1183,7 @@ export function AgentExecutionPanel() {
     }
 
     setAutoMessage("Signal triggered. Submitting backend agent execution.")
-    const outcome = await executeAgentRun(autoStrategy)
+    const outcome = await executeAgentRun(policyStrategy)
     autoInFlightRef.current = false
 
     if (outcome.result?.digest) {
@@ -1248,10 +1205,10 @@ export function AgentExecutionPanel() {
     }
 
     stopAutoRun("error", outcome.error ?? "Auto Run failed.")
-  }, [autoStrategy, checkSignal, executeAgentRun, stopAutoRun, validateRunStrategy])
+  }, [checkSignal, executeAgentRun, policyStrategy, stopAutoRun, validateRunStrategy])
 
   const startAutoRun = React.useCallback(() => {
-    const validation = validateRunStrategy(autoStrategy)
+    const validation = validateRunStrategy(policyStrategy)
     if (executionMode !== "auto_execute") {
       setAutoStatus("error")
       setAutoMessage("Switch execution mode to Auto execute before starting Automation.")
@@ -1283,8 +1240,8 @@ export function AgentExecutionPanel() {
     void runAutoOnce()
   }, [
     autoInterval,
-    autoStrategy,
     executionMode,
+    policyStrategy,
     runAutoOnce,
     thresholdValid,
     validateRunStrategy,
@@ -1315,7 +1272,7 @@ export function AgentExecutionPanel() {
     }
   }, [autoCheckCount, autoInterval, autoStatus, runAutoOnce])
 
-  const autoRunValidation = validateRunStrategy(autoStrategy)
+  const autoRunValidation = validateRunStrategy(policyStrategy)
   const selectedAutoIntervalLabel =
     AUTO_RUN_INTERVALS.find((option) => option.value === autoInterval)?.label ??
     "Off"
@@ -1325,8 +1282,8 @@ export function AgentExecutionPanel() {
       <CardHeader className="border-b border-border">
         <CardTitle>Automation</CardTitle>
         <CardDescription>
-          Test Run validates the selected Mandate and strategy. Automation
-          evaluates on an interval and executes with the backend Trading Agent.
+          Signal, action amount, and Mandate policy determine whether the
+          backend Trading Agent executes.
         </CardDescription>
         <CardAction>
           <Button
@@ -1344,7 +1301,7 @@ export function AgentExecutionPanel() {
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-4 p-4">
-        {/* Natural language planning is out of scope for MVP; this panel executes a predefined DeepBook strategy. */}
+        {/* Natural language planning is out of scope for MVP; this panel executes a configured DeepBook action. */}
         <p className="text-xs text-muted-foreground">
           Owner signs only to create or revoke a Mandate; execution is submitted
           by the backend Trading Agent within the on-chain policy limits.
@@ -1449,61 +1406,6 @@ export function AgentExecutionPanel() {
               {OLD_PACKAGE_MANDATE_MESSAGE}
             </div>
           )}
-        </section>
-
-        <section className="flex flex-col gap-3">
-          <h3 className="text-sm font-semibold text-foreground">
-            Signal Strategy config
-          </h3>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {Object.entries(STRATEGIES).map(([key, option]) => {
-            const value = key as StrategyKey
-            const selected = strategy === value
-            const isExpectedExecuted = option.expectation === "Executed"
-            const disabled = isStrategyDisabled(value, selectedMandate)
-
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => !disabled && handleStrategyChange(value)}
-                disabled={disabled}
-                className={cn(
-                  "flex min-h-[124px] flex-col items-start gap-2.5 rounded-lg border bg-background/60 p-3 text-left transition",
-                  "hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
-                  disabled && "cursor-not-allowed opacity-55 hover:border-border hover:bg-background/60",
-                  selected
-                    ? "border-cyan-400/50 bg-cyan-400/10 shadow-[0_0_24px_rgba(34,211,238,0.08)]"
-                    : "border-border"
-                )}
-                aria-pressed={selected}
-              >
-                <div className="flex w-full items-start justify-between gap-3">
-                  <span className="text-sm font-semibold text-foreground">
-                    {option.label}
-                  </span>
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      "shrink-0 text-[11px] font-medium",
-                      isExpectedExecuted
-                        ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
-                        : "border-amber-500/25 bg-amber-500/10 text-amber-400"
-                    )}
-                  >
-                    Expected: {option.expectation}
-                  </Badge>
-                </div>
-                <span className="text-xs leading-snug text-muted-foreground">
-                  {option.description}
-                </span>
-                <span className="mt-auto font-mono text-xs text-muted-foreground">
-                  Input {formatSui(strategyAmount(value, selectedMandate))}
-                </span>
-              </button>
-            )
-          })}
-          </div>
         </section>
 
         {!selectedMandate && (
@@ -1708,6 +1610,125 @@ export function AgentExecutionPanel() {
         </section>
 
         <section className="flex flex-col gap-3 rounded-lg border border-border bg-background/45 p-3">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">
+              Execution Action
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              This action amount is passed to Test Run and Auto Execute.
+            </p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
+              <span className="text-xs text-muted-foreground">
+                Execution Amount
+              </span>
+              <div className="mt-2 flex items-center gap-2">
+                <Input
+                  type="number"
+                  min="0.000001"
+                  step="0.001"
+                  value={executionAmountSui}
+                  onChange={(event) =>
+                    handleExecutionAmountChange(event.target.value)
+                  }
+                  className="h-8 bg-background/70 font-mono"
+                />
+                <span className="text-xs text-muted-foreground">SUI</span>
+              </div>
+            </div>
+            <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
+              <span className="text-xs text-muted-foreground">Asset</span>
+              <Select
+                value={executionAsset}
+                onValueChange={(value) => setExecutionAsset(value as "SUI")}
+              >
+                <SelectTrigger className="mt-2 h-8 w-full bg-background/70">
+                  <span className="truncate text-left text-sm">
+                    {executionAsset}
+                  </span>
+                </SelectTrigger>
+                <SelectContent align="start">
+                  <SelectGroup>
+                    {EXECUTION_ASSETS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </section>
+
+        <section className="flex flex-col gap-3 rounded-lg border border-border bg-background/45 p-3">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">
+              Policy Preview
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              The Mandate policy gate is evaluated before DeepBook execution.
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {[
+              {
+                label: "Within max tx",
+                ok: policyChecks.maxTx,
+                detail: selectedMandate
+                  ? `${formatSui(actionAmountSui)} <= ${formatSui(selectedMandate.txLimit)}`
+                  : "-",
+              },
+              {
+                label: "Within budget",
+                ok: policyChecks.budget,
+                detail: selectedMandate
+                  ? `${formatSui(actionAmountSui)} <= ${formatSui(remainingBudget)}`
+                  : "-",
+              },
+              {
+                label: "Mandate active",
+                ok: policyChecks.active,
+                detail: selectedMandate
+                  ? selectedMandate.status
+                  : "-",
+              },
+            ].map((item) => (
+              <div
+                key={item.label}
+                className={cn(
+                  "flex min-h-[58px] items-center gap-3 rounded-lg border bg-background/60 px-3 py-2",
+                  item.ok
+                    ? "border-emerald-500/20"
+                    : "border-amber-500/25 bg-amber-500/5"
+                )}
+              >
+                <span
+                  className={cn(
+                    "grid size-5 shrink-0 place-items-center rounded-full text-xs",
+                    item.ok
+                      ? "bg-emerald-500/15 text-emerald-400"
+                      : "bg-amber-500/15 text-amber-400"
+                  )}
+                >
+                  {item.ok ? "✓" : "!"}
+                </span>
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium text-foreground">
+                    {item.label}
+                  </span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {item.detail}
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="flex flex-col gap-3 rounded-lg border border-border bg-background/45 p-3">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-semibold text-foreground">
@@ -1796,49 +1817,25 @@ export function AgentExecutionPanel() {
           </div>
 
           <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
-            <div className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                Automation strategy
-              </span>
-              <Select
-                value={autoStrategy}
-                onValueChange={(value) => {
-                  if (autoStatus === "running") {
-                    stopAutoRun("stopped", "Auto Run stopped after strategy change.")
-                  }
-                  setAutoStrategy(value as StrategyKey)
-                }}
-              >
-                <SelectTrigger className="h-9 w-full bg-background/70">
-                  <span className="truncate text-left text-sm">
-                    {STRATEGIES[autoStrategy].label}
-                  </span>
-                </SelectTrigger>
-                <SelectContent align="start">
-                  <SelectGroup>
-                    {Object.entries(STRATEGIES).map(([key, option]) => {
-                      const value = key as StrategyKey
-                      const disabled = isStrategyDisabled(value, selectedMandate)
-
-                      return (
-                        <SelectItem
-                          key={key}
-                          value={value}
-                          disabled={disabled}
-                          className="py-2"
-                        >
-                          <span className="flex flex-col gap-0.5">
-                            <span>{option.label}</span>
-                            <span className="text-xs text-muted-foreground">
-                              Expected: {option.expectation}
-                            </span>
-                          </span>
-                        </SelectItem>
-                      )
-                    })}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <SummaryChip
+                label="Action"
+                value={formatSui(actionAmountSui)}
+                mono
+              />
+              <SummaryChip
+                label="Policy outcome"
+                value={
+                  policyStrategy === "normal"
+                    ? "Executable"
+                    : policyStrategy === "exceed_per_tx"
+                      ? "Blocked: max tx"
+                      : policyStrategy === "exceed_budget"
+                        ? "Blocked: budget"
+                        : "Blocked: inactive"
+                }
+              />
+              <SummaryChip label="Asset" value={executionAsset} />
             </div>
 
             <div className="flex items-end gap-2">
@@ -1920,53 +1917,34 @@ export function AgentExecutionPanel() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-semibold text-foreground">
-                Recent Executions
+                Recent Activity
               </h3>
               <p className="text-xs text-muted-foreground">
-                Latest Test Run and Automation results from this browser session.
+                Latest events for the selected Mandate.
               </p>
             </div>
-            {result && <ResultStatusBadge status={result.status} />}
+            <div className="flex items-center gap-2">
+              {result && <ResultStatusBadge status={result.status} />}
+              {selectedMandate?.id && (
+                <Link
+                  href={`/console/activity?mandateId=${encodeURIComponent(
+                    selectedMandate.id
+                  )}`}
+                  className="rounded-md px-2 py-1 text-sm text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                >
+                  View all →
+                </Link>
+              )}
+            </div>
           </div>
 
-          {recentExecutions.length > 0 ? (
-            <div className="overflow-hidden rounded-lg border border-border bg-background/45">
-              <div className="grid grid-cols-[1fr_96px_1.2fr_96px] gap-3 border-b border-border px-3 py-2 text-xs text-muted-foreground">
-                <span>Time</span>
-                <span>Status</span>
-                <span>Digest</span>
-                <span className="text-right">Amount</span>
-              </div>
-              <div className="divide-y divide-border">
-                {recentExecutions.slice(0, 5).map((execution) => (
-                  <div
-                    key={execution.id}
-                    className="grid grid-cols-[1fr_96px_1.2fr_96px] items-center gap-3 px-3 py-3 text-sm"
-                  >
-                    <span className="font-mono text-xs text-muted-foreground">
-                      {executionTimeLabel(execution.timeMs)}
-                    </span>
-                    <ResultStatusBadge status={execution.status} />
-                    <span className="min-w-0">
-                      {execution.digest ? (
-                        <span className="inline-flex min-w-0 items-center gap-1">
-                          <CopyableId value={execution.digest} label="execution digest" />
-                          <ExplorerLink digest={execution.digest} />
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </span>
-                    <span className="text-right font-mono text-xs text-foreground">
-                      {formatSui(execution.amountSui)}
-                    </span>
-                  </div>
-                ))}
-              </div>
+          {selectedMandateActivity.length > 0 ? (
+            <div className="rounded-lg border border-border bg-background/45 px-3">
+              <ActivityFeed events={selectedMandateActivity} />
             </div>
           ) : (
             <div className="rounded-lg border border-dashed border-border bg-background/50 p-4 text-sm text-muted-foreground">
-              No executions yet.
+              No activity for this mandate yet.
             </div>
           )}
         </section>

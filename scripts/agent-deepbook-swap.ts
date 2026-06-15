@@ -29,7 +29,17 @@ type TransactionLike = {
     gas_used?: GasUsedLike;
   };
   events?: Array<{ eventType?: string }>;
-  balanceChanges?: Array<{ coinType?: string; amount?: string }>;
+  balanceChanges?: Array<{
+    coinType?: string;
+    amount?: string;
+    owner?: string | { AddressOwner?: string; ObjectOwner?: string };
+  }>;
+  objectChanges?: Array<{
+    type?: string;
+    objectType?: string;
+    objectId?: string;
+    owner?: string | { AddressOwner?: string; ObjectOwner?: string; Shared?: unknown; Immutable?: boolean };
+  }>;
 };
 
 type GasUsedLike = {
@@ -79,6 +89,13 @@ function packageFromObjectType(objectType: string | undefined): string {
 type MandateObjectInfo = {
   objectType?: string;
   owner?: string;
+};
+
+type CoinObjectInfo = {
+  objectId: string;
+  objectType?: string;
+  owner?: string;
+  balance?: string;
 };
 
 function isCurrentMandateObjectType(objectType: string | undefined, packageId: string): boolean {
@@ -135,6 +152,56 @@ async function fetchMandateObjectInfo(mandateId: string): Promise<MandateObjectI
   };
 }
 
+async function fetchCoinObjectInfo(objectId: string): Promise<CoinObjectInfo> {
+  const response = await fetch('https://fullnode.testnet.sui.io:443', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'sui_getObject',
+      params: [
+        objectId,
+        {
+          showContent: true,
+          showOwner: true,
+          showType: true,
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Unable to fetch coin object ${objectId}: HTTP ${response.status}`);
+  }
+
+  const payload = (await response.json()) as {
+    result?: {
+      data?: {
+        type?: string;
+        owner?: string | { AddressOwner?: string };
+        content?: {
+          dataType?: string;
+          fields?: {
+            balance?: string;
+          };
+        };
+      };
+    };
+  };
+  const data = payload.result?.data;
+  return {
+    objectId,
+    objectType: data?.type,
+    owner: objectOwnerAddress(data?.owner),
+    balance:
+      data?.content?.dataType === 'moveObject' &&
+      typeof data.content.fields?.balance === 'string'
+        ? data.content.fields.balance
+        : undefined,
+  };
+}
+
 function parseSuiToMist(value: string): bigint {
   const [wholePart, fractionalPart = ''] = value.split('.');
   if (!wholePart || !/^\d+$/.test(wholePart) || !/^\d*$/.test(fractionalPart)) {
@@ -182,6 +249,70 @@ function netSuiBalanceChange(balanceChanges: TransactionLike['balanceChanges']):
   return formatMistDelta(total.toString());
 }
 
+function formatDeepAmount(amount: string | undefined): string | undefined {
+  if (!amount) {
+    return undefined;
+  }
+
+  const value = BigInt(amount);
+  if (value <= 0n) {
+    return undefined;
+  }
+
+  const decimals = 1_000_000n;
+  const whole = value / decimals;
+  const fractional = (value % decimals).toString().padStart(6, '0').replace(/0+$/, '');
+  return `${whole.toString()}${fractional ? `.${fractional}` : ''} DEEP`;
+}
+
+function sumPositiveCoinBalances(coins: CoinObjectInfo[]): string | undefined {
+  const total = coins.reduce((sum, coin) => sum + BigInt(coin.balance ?? '0'), 0n);
+  return total > 0n ? total.toString() : undefined;
+}
+
+function ownerPositiveBalanceChange(
+  balanceChanges: TransactionLike['balanceChanges'],
+  ownerAddress: string,
+  predicate: (coinType: string | undefined) => boolean,
+): string | undefined {
+  const total = (balanceChanges ?? [])
+    .filter((change) => {
+      const owner = objectOwnerAddress(change.owner);
+      return (
+        Boolean(owner) &&
+        normalizeSuiAddress(owner!) === normalizeSuiAddress(ownerAddress) &&
+        predicate(change.coinType)
+      );
+    })
+    .reduce((sum, change) => sum + BigInt(change.amount ?? '0'), 0n);
+
+  return total > 0n ? total.toString() : undefined;
+}
+
+function ownerOutputDeepAmount(
+  balanceChanges: TransactionLike['balanceChanges'],
+  ownerAddress: string,
+): string | undefined {
+  const amount = ownerPositiveBalanceChange(
+    balanceChanges,
+    ownerAddress,
+    (coinType) => Boolean(coinType && coinType !== SUI_TYPE && coinType !== NORMALIZED_SUI_TYPE),
+  );
+  return formatDeepAmount(amount);
+}
+
+function ownerResidualSui(
+  balanceChanges: TransactionLike['balanceChanges'],
+  ownerAddress: string,
+): string | undefined {
+  const amount = ownerPositiveBalanceChange(
+    balanceChanges,
+    ownerAddress,
+    (coinType) => coinType === SUI_TYPE || coinType === NORMALIZED_SUI_TYPE,
+  );
+  return amount ? formatMistDelta(amount) : undefined;
+}
+
 function gasFee(effects: TransactionLike['effects']): string {
   const gasUsed = effects?.gasUsed ?? effects?.gas_used;
   if (!gasUsed) {
@@ -194,6 +325,41 @@ function gasFee(effects: TransactionLike['effects']): string {
   return formatMistDelta((computationCost + storageCost - storageRebate).toString());
 }
 
+function objectOwnerAddress(
+  owner: string | { AddressOwner?: string; ObjectOwner?: string; Shared?: unknown; Immutable?: boolean } | undefined,
+): string | undefined {
+  if (typeof owner === 'string') {
+    return owner;
+  }
+  return owner?.AddressOwner;
+}
+
+function isSuiCoinObjectType(objectType: string | undefined): boolean {
+  return Boolean(
+    objectType?.includes('::coin::Coin<') &&
+      (objectType.includes('::sui::SUI') || objectType.includes(`${SUI_TYPE}>`) || objectType.includes(`${NORMALIZED_SUI_TYPE}>`)),
+  );
+}
+
+function outputCoinObjectIds(
+  objectChanges: TransactionLike['objectChanges'],
+  mandateOwner: string,
+): string[] {
+  return (objectChanges ?? [])
+    .filter((change) => {
+      const owner = objectOwnerAddress(change.owner);
+      return (
+        change.type === 'created' &&
+        Boolean(change.objectId) &&
+        change.objectType?.includes('::coin::Coin<') &&
+        !isSuiCoinObjectType(change.objectType) &&
+        Boolean(owner) &&
+        normalizeSuiAddress(owner!) === normalizeSuiAddress(mandateOwner)
+      );
+    })
+    .map((change) => change.objectId!)
+}
+
 function printDemoSummary({
   digest,
   success,
@@ -204,6 +370,12 @@ function printDemoSummary({
   deepBookPoolMutated,
   balanceChange,
   gasFeeSui,
+  outputCoinIds,
+  outputOwner,
+  outputCoinType,
+  outputAmount,
+  residualSui,
+  fillStatus,
   failureReason,
 }: {
   digest: string;
@@ -215,6 +387,12 @@ function printDemoSummary({
   deepBookPoolMutated: boolean;
   balanceChange: string;
   gasFeeSui: string;
+  outputCoinIds: string[];
+  outputOwner: string;
+  outputCoinType?: string;
+  outputAmount?: string;
+  residualSui?: string;
+  fillStatus: 'filled' | 'no_fill' | 'amount_unavailable';
   failureReason?: unknown;
 }) {
   console.log('========================================');
@@ -247,6 +425,27 @@ function printDemoSummary({
   console.log('');
   console.log('Gas Fee:');
   console.log(gasFeeSui);
+  console.log('');
+  console.log('Output Asset:');
+  console.log(outputCoinIds.length > 0 ? 'DEEP' : '-');
+  console.log('');
+  console.log('Output Coin Type:');
+  console.log(outputCoinType ?? '-');
+  console.log('');
+  console.log('Output Amount:');
+  console.log(outputAmount ?? '-');
+  console.log('');
+  console.log('Residual SUI:');
+  console.log(residualSui ?? '-');
+  console.log('');
+  console.log('Fill Status:');
+  console.log(fillStatus);
+  console.log('');
+  console.log('Output Coin Objects:');
+  console.log(outputCoinIds.length > 0 ? outputCoinIds.join(',') : '-');
+  console.log('');
+  console.log('Output Owner:');
+  console.log(outputOwner);
 
   if (!success) {
     console.log('');
@@ -361,6 +560,7 @@ async function main() {
       effects: true,
       events: true,
       balanceChanges: true,
+      objectChanges: true,
       transaction: true,
     },
   });
@@ -377,6 +577,7 @@ async function main() {
       effects: true,
       events: true,
       balanceChanges: true,
+      objectChanges: true,
       transaction: true,
     },
   });
@@ -391,6 +592,26 @@ async function main() {
   const success = confirmed.status?.success === true;
   const activityEventFound = hasMandateActivityEvent(confirmed.events, packageId);
   const deepBookPoolMutated = hasDeepBookPoolMutation(confirmed.effects, poolId);
+  const outputCoinIds = outputCoinObjectIds(confirmed.objectChanges, mandateOwner);
+  const outputCoinInfos = await Promise.all(
+    outputCoinIds.map((objectId) => fetchCoinObjectInfo(objectId).catch(() => ({
+      objectId,
+    }))),
+  );
+  const outputCoinType = outputCoinInfos.find((coin) => coin.objectType)?.objectType;
+  const balanceChangeOutputAmount = ownerOutputDeepAmount(
+    confirmed.balanceChanges,
+    mandateOwner,
+  );
+  const objectOutputAmount = formatDeepAmount(sumPositiveCoinBalances(outputCoinInfos));
+  const outputAmount = balanceChangeOutputAmount ?? objectOutputAmount;
+  const residualSui = ownerResidualSui(confirmed.balanceChanges, mandateOwner);
+  const hasParsedObjectBalances = outputCoinInfos.some((coin) => typeof coin.balance === 'string');
+  const fillStatus = outputAmount
+    ? 'filled'
+    : outputCoinIds.length === 0 || hasParsedObjectBalances
+      ? 'no_fill'
+      : 'amount_unavailable';
 
   printDemoSummary({
     digest: confirmed.digest,
@@ -402,6 +623,12 @@ async function main() {
     deepBookPoolMutated,
     balanceChange: netSuiBalanceChange(confirmed.balanceChanges),
     gasFeeSui: gasFee(confirmed.effects),
+    outputCoinIds,
+    outputOwner: mandateOwner,
+    outputCoinType,
+    outputAmount,
+    residualSui,
+    fillStatus,
     failureReason: confirmed.status?.error,
   });
 
