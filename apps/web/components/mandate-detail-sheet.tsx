@@ -270,6 +270,10 @@ export function MandateDetailSheet({
         target: `${PACKAGE_ID}::mandate::revoke_mandate`,
         arguments: [tx.object(mandate.id), tx.object(CLOCK_OBJECT_ID)],
       })
+      tx.moveCall({
+        target: `${PACKAGE_ID}::mandate::withdraw_remaining_sui`,
+        arguments: [tx.object(mandate.id)],
+      })
 
       const result = await withRevokeTimeout(
         signAndExecute.mutateAsync({ transaction: tx })
@@ -563,7 +567,7 @@ export function MandateDetailSheet({
                         onClick={handleRevoke}
                         disabled={isRevoking}
                       >
-                        {isRevoking ? "Revoking" : "Confirm revoke"}
+                        {isRevoking ? "Revoking" : "Confirm revoke + withdraw"}
                       </Button>
                       <Button
                         size="sm"
@@ -580,8 +584,8 @@ export function MandateDetailSheet({
                     <div>
                       <h3 className="text-sm font-medium">Owner controls</h3>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Revocation is signed by the owner wallet and enforced
-                        by the Mandate Move policy.
+                        Revocation is signed by the owner wallet. Remaining
+                        vault SUI is withdrawn back to the owner.
                       </p>
                     </div>
                     <Button
@@ -596,7 +600,7 @@ export function MandateDetailSheet({
                             : "Verifying Mandate package before revoke"
                       }
                     >
-                      {isRevoking ? "Revoking" : "Revoke Mandate"}
+                      {isRevoking ? "Revoking" : "Revoke + Withdraw"}
                     </Button>
                   </div>
                 )}

@@ -3,10 +3,12 @@
 /// rules before a mocked DeepBook order can be recorded on-chain.
 module mandate::mandate;
 
+use sui::balance::{Self, Balance};
 use sui::clock::{Self, Clock};
 use sui::coin::{Self, Coin};
 use sui::event;
 use sui::object::{Self, ID, UID};
+use sui::sui::SUI;
 use sui::transfer;
 use sui::tx_context::{Self, TxContext};
 
@@ -49,6 +51,7 @@ public struct Mandate has key {
     expires_at_ms: u64,
     is_active: bool,
     created_at_ms: u64,
+    sui_balance: Balance<SUI>,
 }
 
 /// Emitted when an owner creates a mandate.
@@ -125,6 +128,11 @@ public fun current_spent(mandate: &Mandate): u64 {
     mandate.current_spent
 }
 
+/// Returns the SUI currently escrowed in the mandate vault.
+public fun vault_balance(mandate: &Mandate): u64 {
+    balance::value(&mandate.sui_balance)
+}
+
 /// Returns whether the mandate is currently active.
 public fun is_active(mandate: &Mandate): bool {
     mandate.is_active
@@ -142,13 +150,15 @@ public fun expires_at_ms(mandate: &Mandate): u64 {
 /// is shared so the authorized agent can execute autonomously.
 entry fun create_mandate(
     agent: address,
-    budget_ceiling: u64,
+    budget_coin: Coin<SUI>,
     max_single_tx: u64,
     protocol_scope: u8,
     ttl_ms: u64,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
+    let budget_ceiling = coin::value(&budget_coin);
+
     assert!(ttl_ms > 0, E_INVALID_TTL);
     assert!(
         budget_ceiling > 0 && max_single_tx > 0 && max_single_tx <= budget_ceiling,
@@ -170,6 +180,7 @@ entry fun create_mandate(
         expires_at_ms,
         is_active: true,
         created_at_ms,
+        sui_balance: coin::into_balance(budget_coin),
     };
     let mandate_id = object::id(&mandate);
 
@@ -223,19 +234,18 @@ entry fun execute_deepbook_order_mock(
 
 /// Authorizes a real coin-backed DeepBook spend inside a PTB.
 ///
-/// This function does not call DeepBook directly. It reads the exact value from
-/// `input_coin`, enforces the mandate policy, records spend, and emits an
-/// activity event. The same PTB can then pass `input_coin` into DeepBook.
-#[allow(unused_mut_parameter)]
-entry fun authorize_deepbook_spend_with_coin<T>(
+/// This function does not call DeepBook directly. It withdraws the exact SUI
+/// amount from the mandate vault, enforces policy, records spend, and emits an
+/// activity event. The same PTB can then pass the returned Coin<SUI> into
+/// DeepBook.
+public fun authorize_and_take_sui_for_deepbook(
     mandate: &mut Mandate,
-    input_coin: &Coin<T>,
+    amount: u64,
     clock: &Clock,
     ctx: &mut TxContext,
-) {
+): Coin<SUI> {
     let sender = tx_context::sender(ctx);
     let timestamp_ms = clock::timestamp_ms(clock);
-    let amount = coin::value(input_coin);
 
     assert!(sender == mandate.agent, E_NOT_AGENT);
     assert!(mandate.is_active, E_REVOKED);
@@ -243,8 +253,10 @@ entry fun authorize_deepbook_spend_with_coin<T>(
     assert!(mandate.protocol_scope == PROTOCOL_DEEPBOOK, E_PROTOCOL_NOT_ALLOWED);
     assert!(amount <= mandate.max_single_tx, E_SINGLE_TX_LIMIT_EXCEEDED);
     assert!(amount <= mandate.budget_ceiling - mandate.current_spent, E_BUDGET_EXCEEDED);
+    assert!(amount <= balance::value(&mandate.sui_balance), E_BUDGET_EXCEEDED);
 
     mandate.current_spent = mandate.current_spent + amount;
+    let withdrawn = balance::split(&mut mandate.sui_balance, amount);
 
     event::emit(ActivityEvent {
         mandate_id: object::id(mandate),
@@ -255,6 +267,8 @@ entry fun authorize_deepbook_spend_with_coin<T>(
         timestamp_ms,
         success: true,
     });
+
+    coin::from_balance(withdrawn, ctx)
 }
 
 /// Records a blocked agent action without consuming budget.
@@ -302,4 +316,22 @@ entry fun revoke_mandate(
         owner: sender,
         timestamp_ms: clock::timestamp_ms(clock),
     });
+}
+
+/// Withdraws all remaining SUI from an inactive mandate vault.
+///
+/// The owner can recover unspent budget after revoking the mandate. This does
+/// not destroy the mandate object so its policy state and activity history
+/// remain inspectable.
+entry fun withdraw_remaining_sui(
+    mandate: &mut Mandate,
+    ctx: &mut TxContext,
+) {
+    let sender = tx_context::sender(ctx);
+    assert!(sender == mandate.owner, E_NOT_OWNER);
+    assert!(!mandate.is_active, E_REVOKED);
+
+    let amount = balance::value(&mandate.sui_balance);
+    let withdrawn = balance::split(&mut mandate.sui_balance, amount);
+    transfer::public_transfer(coin::from_balance(withdrawn, ctx), sender);
 }

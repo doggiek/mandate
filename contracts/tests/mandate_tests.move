@@ -19,9 +19,10 @@ fun new_clock(scenario: &mut Scenario): Clock {
 /// Creates the default demo mandate:
 /// 100 budget, 20 max single transaction, DeepBook only, 24h expiry.
 fun create_default_mandate(scenario: &mut Scenario, clock: &Clock) {
+    let budget_coin = coin::mint_for_testing<SUI>(100, test_scenario::ctx(scenario));
     mandate::create_mandate(
         AGENT,
-        100,
+        budget_coin,
         20,
         mandate::deepbook_protocol(),
         86_400_000,
@@ -44,6 +45,7 @@ fun owner_creates_mandate_success() {
     assert!(mandate::agent(&mandate) == AGENT, 1);
     assert!(mandate::current_spent(&mandate) == 0, 2);
     assert!(mandate::is_active(&mandate), 3);
+    assert!(mandate::vault_balance(&mandate) == 100, 4);
     test_scenario::return_shared(mandate);
 
     clock::destroy_for_testing(clock);
@@ -164,9 +166,9 @@ fun expired_mandate_execute_fails() {
     test_scenario::end(scenario);
 }
 
-/// Authorized agent can approve a real Coin<SUI> amount for a later DeepBook PTB step.
+/// Authorized agent can take Owner-funded SUI from the mandate vault for DeepBook.
 #[test]
-fun agent_authorizes_sui_coin_success() {
+fun agent_takes_vault_sui_success() {
     let mut scenario = test_scenario::begin(OWNER);
     let clock = new_clock(&mut scenario);
 
@@ -174,9 +176,14 @@ fun agent_authorizes_sui_coin_success() {
 
     test_scenario::next_tx(&mut scenario, AGENT);
     let mut mandate = test_scenario::take_shared<Mandate>(&scenario);
-    let coin = coin::mint_for_testing<SUI>(20, test_scenario::ctx(&mut scenario));
-    mandate::authorize_deepbook_spend_with_coin(&mut mandate, &coin, &clock, test_scenario::ctx(&mut scenario));
+    let coin = mandate::authorize_and_take_sui_for_deepbook(
+        &mut mandate,
+        20,
+        &clock,
+        test_scenario::ctx(&mut scenario),
+    );
     assert!(mandate::current_spent(&mandate) == 20, 0);
+    assert!(mandate::vault_balance(&mandate) == 80, 1);
     test_scenario::return_shared(mandate);
     coin::burn_for_testing(coin);
 
@@ -184,10 +191,10 @@ fun agent_authorizes_sui_coin_success() {
     test_scenario::end(scenario);
 }
 
-/// A real coin value above the mandate's max single transaction limit is rejected.
+/// A vault withdrawal above the mandate's max single transaction limit is rejected.
 #[test]
 #[expected_failure(abort_code = 6)]
-fun coin_authorization_exceeds_single_tx_limit_fails() {
+fun vault_authorization_exceeds_single_tx_limit_fails() {
     let mut scenario = test_scenario::begin(OWNER);
     let clock = new_clock(&mut scenario);
 
@@ -195,18 +202,22 @@ fun coin_authorization_exceeds_single_tx_limit_fails() {
 
     test_scenario::next_tx(&mut scenario, AGENT);
     let mut mandate = test_scenario::take_shared<Mandate>(&scenario);
-    let coin = coin::mint_for_testing<SUI>(21, test_scenario::ctx(&mut scenario));
-    mandate::authorize_deepbook_spend_with_coin(&mut mandate, &coin, &clock, test_scenario::ctx(&mut scenario));
+    let coin = mandate::authorize_and_take_sui_for_deepbook(
+        &mut mandate,
+        21,
+        &clock,
+        test_scenario::ctx(&mut scenario),
+    );
     test_scenario::return_shared(mandate);
     coin::burn_for_testing(coin);
     clock::destroy_for_testing(clock);
     test_scenario::end(scenario);
 }
 
-/// Revoked mandates also reject coin-backed DeepBook authorization.
+/// Revoked mandates also reject vault-backed DeepBook authorization.
 #[test]
 #[expected_failure(abort_code = 3)]
-fun revoked_mandate_coin_authorization_fails() {
+fun revoked_mandate_vault_authorization_fails() {
     let mut scenario = test_scenario::begin(OWNER);
     let clock = new_clock(&mut scenario);
 
@@ -219,10 +230,49 @@ fun revoked_mandate_coin_authorization_fails() {
 
     test_scenario::next_tx(&mut scenario, AGENT);
     let mut mandate = test_scenario::take_shared<Mandate>(&scenario);
-    let coin = coin::mint_for_testing<SUI>(20, test_scenario::ctx(&mut scenario));
-    mandate::authorize_deepbook_spend_with_coin(&mut mandate, &coin, &clock, test_scenario::ctx(&mut scenario));
+    let coin = mandate::authorize_and_take_sui_for_deepbook(
+        &mut mandate,
+        20,
+        &clock,
+        test_scenario::ctx(&mut scenario),
+    );
     test_scenario::return_shared(mandate);
     coin::burn_for_testing(coin);
+    clock::destroy_for_testing(clock);
+    test_scenario::end(scenario);
+}
+
+/// Owner can recover remaining vault SUI after revoking the mandate.
+#[test]
+fun owner_withdraws_remaining_sui_after_revoke() {
+    let mut scenario = test_scenario::begin(OWNER);
+    let clock = new_clock(&mut scenario);
+
+    create_default_mandate(&mut scenario, &clock);
+
+    test_scenario::next_tx(&mut scenario, AGENT);
+    let mut mandate = test_scenario::take_shared<Mandate>(&scenario);
+    let coin = mandate::authorize_and_take_sui_for_deepbook(
+        &mut mandate,
+        20,
+        &clock,
+        test_scenario::ctx(&mut scenario),
+    );
+    test_scenario::return_shared(mandate);
+    coin::burn_for_testing(coin);
+
+    test_scenario::next_tx(&mut scenario, OWNER);
+    let mut mandate = test_scenario::take_shared<Mandate>(&scenario);
+    mandate::revoke_mandate(&mut mandate, &clock, test_scenario::ctx(&mut scenario));
+    mandate::withdraw_remaining_sui(&mut mandate, test_scenario::ctx(&mut scenario));
+    assert!(mandate::vault_balance(&mandate) == 0, 0);
+    test_scenario::return_shared(mandate);
+
+    test_scenario::next_tx(&mut scenario, OWNER);
+    let withdrawn = test_scenario::take_from_sender<Coin<SUI>>(&scenario);
+    assert!(coin::value(&withdrawn) == 80, 1);
+    coin::burn_for_testing(withdrawn);
+
     clock::destroy_for_testing(clock);
     test_scenario::end(scenario);
 }

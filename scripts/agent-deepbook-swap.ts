@@ -67,6 +67,11 @@ function packageFromObjectType(objectType: string | undefined): string {
   return objectType?.split('::')[0] ?? '';
 }
 
+type MandateObjectInfo = {
+  objectType?: string;
+  owner?: string;
+};
+
 function isCurrentMandateObjectType(objectType: string | undefined, packageId: string): boolean {
   return (
     Boolean(objectType?.endsWith('::mandate::Mandate')) &&
@@ -74,7 +79,7 @@ function isCurrentMandateObjectType(objectType: string | undefined, packageId: s
   );
 }
 
-async function fetchMandateObjectType(mandateId: string): Promise<string | undefined> {
+async function fetchMandateObjectInfo(mandateId: string): Promise<MandateObjectInfo> {
   const response = await fetch('https://fullnode.testnet.sui.io:443', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -102,6 +107,7 @@ async function fetchMandateObjectType(mandateId: string): Promise<string | undef
         content?: {
           dataType?: string;
           type?: string;
+          fields?: Record<string, unknown>;
         };
       };
     };
@@ -112,7 +118,12 @@ async function fetchMandateObjectType(mandateId: string): Promise<string | undef
   }
 
   const content = payload.result?.data?.content;
-  return content?.dataType === 'moveObject' ? content.type : undefined;
+  const fields = content?.fields;
+  const owner = fields && typeof fields.owner === 'string' ? fields.owner : undefined;
+  return {
+    objectType: content?.dataType === 'moveObject' ? content.type : undefined,
+    owner,
+  };
 }
 
 function parseSuiToMist(value: string): bigint {
@@ -259,12 +270,15 @@ async function main() {
 
   const keypair = Ed25519Keypair.fromSecretKey(secretKey);
   const agentAddress = keypair.toSuiAddress();
-  const mandateObjectType = await fetchMandateObjectType(mandateId);
+  const mandateObject = await fetchMandateObjectInfo(mandateId);
+  const mandateObjectType = mandateObject.objectType;
+  const mandateOwner = mandateObject.owner;
 
   console.log('[MANDATE] agent execution preflight');
   console.log(`[MANDATE] package id: ${packageId}`);
   console.log(`[MANDATE] mandate id: ${mandateId}`);
   console.log(`[MANDATE] mandate objectType: ${mandateObjectType ?? 'unknown'}`);
+  console.log(`[MANDATE] mandate owner: ${mandateOwner ?? 'unknown'}`);
   console.log(`[MANDATE] agent wallet address: ${agentAddress}`);
   console.log(`[MANDATE] selected strategy: ${strategy}`);
 
@@ -275,6 +289,9 @@ async function main() {
       }.`,
     );
   }
+  if (!mandateOwner || !isValidSuiAddress(mandateOwner)) {
+    throw new Error(`Unable to read mandate owner from object ${mandateId}`);
+  }
 
   const client = new SuiGrpcClient({
     network: 'testnet',
@@ -284,17 +301,13 @@ async function main() {
   const tx = new Transaction();
   tx.setSender(agentAddress);
 
-  // DEEP_SUI has DEEP as base and SUI as quote. We split one SUI coin, let
-  // Mandate authorize the exact coin value, then pass that same coin to
-  // DeepBook as quoteCoin in the same PTB.
-  const [inputSuiCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(amountMist)]);
-
-  tx.moveCall({
-    target: `${packageId}::mandate::authorize_deepbook_spend_with_coin`,
-    typeArguments: [SUI_TYPE],
+  // DEEP_SUI has DEEP as base and SUI as quote. The agent pays gas, but the
+  // swap input SUI is withdrawn from the Owner-funded Mandate vault.
+  const [inputSuiCoin] = tx.moveCall({
+    target: `${packageId}::mandate::authorize_and_take_sui_for_deepbook`,
     arguments: [
       tx.object(mandateId),
-      inputSuiCoin,
+      tx.pure.u64(amountMist),
       tx.object.clock(), // 0x6
     ],
   });
@@ -308,7 +321,7 @@ async function main() {
     quoteCoin: inputSuiCoin,
   })(tx);
 
-  tx.transferObjects([baseCoinOut, quoteCoinOut, deepCoinOut], agentAddress);
+  tx.transferObjects([baseCoinOut, quoteCoinOut, deepCoinOut], mandateOwner);
 
   const result = await client.core.signAndExecuteTransaction({
     signer: keypair,

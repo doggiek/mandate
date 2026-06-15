@@ -271,11 +271,12 @@ export function CreateMandateDialog({
       }
 
       const tx = new Transaction()
+      const [budgetCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(budgetCeilingMist)])
       tx.moveCall({
         target: `${PACKAGE_ID}::mandate::create_mandate`,
         arguments: [
           tx.pure.address(agentAddress.trim()),
-          tx.pure.u64(budgetCeilingMist),
+          budgetCoin,
           tx.pure.u64(maxSingleTxMist),
           tx.pure.u8(PROTOCOL_SCOPE_DEEPBOOK),
           tx.pure.u64(ttlMs),

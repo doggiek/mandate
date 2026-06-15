@@ -1,6 +1,6 @@
-"use client"
+"use client";
 
-import * as React from "react"
+import * as React from "react";
 import {
   Card,
   CardAction,
@@ -8,19 +8,19 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
-import { Button, buttonVariants } from "@/components/ui/button"
-import { AgentExecutionPanel } from "@/components/agent-execution-panel"
-import { MandateTable } from "@/components/mandate-table"
-import { ActivityFeed } from "@/components/activity-feed"
-import { CopyableId } from "@/components/copyable-id"
-import { ExplorerLink } from "@/components/explorer-link"
-import { Skeleton } from "@/components/ui/skeleton"
-import { sortActivitiesByTimeDesc } from "@/lib/activity-utils"
-import { formatSui } from "@/lib/format"
-import { useMandateStore } from "@/lib/mandate-store"
-import { ArrowRight, Plus } from "lucide-react"
-import Link from "next/link"
+} from "@/components/ui/card";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { AgentExecutionPanel } from "@/components/agent-execution-panel";
+import { MandateTable } from "@/components/mandate-table";
+import { ActivityFeed } from "@/components/activity-feed";
+import { CopyableId } from "@/components/copyable-id";
+import { ExplorerLink } from "@/components/explorer-link";
+import { Skeleton } from "@/components/ui/skeleton";
+import { sortActivitiesByTimeDesc } from "@/lib/activity-utils";
+import { formatSui } from "@/lib/format";
+import { useMandateStore } from "@/lib/mandate-store";
+import { ArrowRight, Plus } from "lucide-react";
+import Link from "next/link";
 
 function SummaryMetricSkeleton() {
   return (
@@ -36,7 +36,7 @@ function SummaryMetricSkeleton() {
         </div>
       ))}
     </div>
-  )
+  );
 }
 
 function MiniMetricsSkeleton() {
@@ -53,7 +53,7 @@ function MiniMetricsSkeleton() {
         </div>
       ))}
     </div>
-  )
+  );
 }
 
 function ConsoleOverviewSkeleton() {
@@ -66,7 +66,7 @@ function ConsoleOverviewSkeleton() {
       <SummaryMetricSkeleton />
       <MiniMetricsSkeleton />
     </section>
-  )
+  );
 }
 
 function RunAgentSkeleton() {
@@ -101,7 +101,7 @@ function RunAgentSkeleton() {
         </section>
       </CardContent>
     </Card>
-  )
+  );
 }
 
 function OverviewSkeleton() {
@@ -111,7 +111,7 @@ function OverviewSkeleton() {
       <RunAgentSkeleton />
       <OverviewListSkeleton />
     </div>
-  )
+  );
 }
 
 function SummaryMetricCard({
@@ -121,11 +121,11 @@ function SummaryMetricCard({
   mini = false,
   title,
 }: {
-  label: string
-  value: React.ReactNode
-  helper: string
-  mini?: boolean
-  title?: string
+  label: string;
+  value: React.ReactNode;
+  helper: string;
+  mini?: boolean;
+  title?: string;
 }) {
   return (
     <div
@@ -146,7 +146,7 @@ function SummaryMetricCard({
         {helper}
       </p>
     </div>
-  )
+  );
 }
 
 function OverviewListSkeleton() {
@@ -178,7 +178,7 @@ function OverviewListSkeleton() {
         </CardContent>
       </Card>
     </section>
-  )
+  );
 }
 
 export function OverviewView({
@@ -186,40 +186,45 @@ export function OverviewView({
   onCreate,
   onViewAll,
 }: {
-  onSelectMandate: (id: string) => void
-  onCreate: () => void
-  onViewAll: () => void
+  onSelectMandate: (id: string) => void;
+  onCreate: () => void;
+  onViewAll: () => void;
 }) {
-  const { mandates, activity, orders, loading, error, isWalletScoped } = useMandateStore()
+  const { mandates, activity, orders, loading, error, isWalletScoped } =
+    useMandateStore();
   const activeMandates = React.useMemo(
     () => mandates.filter((m) => m.status === "active"),
-    [mandates]
-  )
+    [mandates],
+  );
 
   const stats = React.useMemo(() => {
     const activeAgentKeys = new Set(
       activeMandates
         .map((mandate) => mandate.agentAddress)
         .filter((address): address is string => Boolean(address))
-        .map((address) => address.toLowerCase())
-    )
+        .map((address) => address.toLowerCase()),
+    );
     const authorizedBudget = activeMandates.reduce(
       (sum, mandate) => sum + mandate.budget,
-      0
-    )
-    const successfulOrders = orders.filter((order) => order.status !== "failed")
+      0,
+    );
+    const successfulOrders = orders.filter(
+      (order) => order.status !== "failed",
+    );
     const totalExecutedAmount = successfulOrders.reduce(
       (sum, order) => sum + (order.amountSui ?? 0),
-      0
-    )
-    const blockedActivities = activity.filter((event) => event.kind === "tx.blocked")
+      0,
+    );
+    const blockedActivities = activity.filter(
+      (event) => event.kind === "tx.blocked",
+    );
     const totalBlockedAmount = blockedActivities.reduce(
       (sum, event) => sum + (event.amountSui ?? event.amount ?? 0),
-      0
-    )
+      0,
+    );
     const latestExecution = [...successfulOrders].sort(
-      (a, b) => b.timestamp - a.timestamp
-    )[0]
+      (a, b) => b.timestamp - a.timestamp,
+    )[0];
 
     return {
       activeAgents: activeAgentKeys.size,
@@ -230,26 +235,27 @@ export function OverviewView({
       blockedActions: blockedActivities.length,
       totalBlockedAmount,
       latestExecution,
-    }
-  }, [activeMandates, activity, orders])
+    };
+  }, [activeMandates, activity, orders]);
   const recentActivity = React.useMemo(
     () => sortActivitiesByTimeDesc(activity).slice(0, 5),
-    [activity]
-  )
+    [activity],
+  );
   const isInitialLoading =
-    loading && mandates.length === 0 && activity.length === 0 && orders.length === 0
+    loading &&
+    mandates.length === 0 &&
+    activity.length === 0 &&
+    orders.length === 0;
 
   if (isInitialLoading) {
-    return <OverviewSkeleton />
+    return <OverviewSkeleton />;
   }
 
   return (
     <div className="flex flex-col gap-4">
       <section className="flex flex-col gap-3">
         <div>
-          <h2 className="text-base font-semibold text-foreground">
-            Summary
-          </h2>
+          <h2 className="text-base font-semibold text-foreground">Summary</h2>
           <p className="text-sm text-muted-foreground">
             Delegated agent spending, executions, and policy blocks
           </p>
@@ -405,5 +411,5 @@ export function OverviewView({
         </Card>
       </section>
     </div>
-  )
+  );
 }

@@ -229,7 +229,7 @@ function normalizeAgentRunError(message: string) {
 
   if (
     lower.includes("moveabort") &&
-    lower.includes("authorize_deepbook_spend_with_coin") &&
+    lower.includes("authorize_and_take_sui_for_deepbook") &&
     (lower.includes("abort code: 2") || lower.includes("abort_code: 2"))
   ) {
     return AGENT_MISMATCH_MESSAGE
