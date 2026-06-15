@@ -1,12 +1,10 @@
 import fs from "node:fs"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 
-function loadRootPublicEnv() {
-  const rootEnvPath = path.resolve(
-    /* turbopackIgnore: true */ process.cwd(),
-    "../..",
-    ".env.local"
-  )
+function loadRootEnv() {
+  const configDir = path.dirname(fileURLToPath(import.meta.url))
+  const rootEnvPath = path.resolve(configDir, "../..", ".env.local")
   if (!fs.existsSync(rootEnvPath)) {
     return
   }
@@ -25,13 +23,13 @@ function loadRootPublicEnv() {
 
     const key = trimmed.slice(0, index).trim()
     const value = trimmed.slice(index + 1).trim().replace(/^['"]|['"]$/g, "")
-    if (key.startsWith("NEXT_PUBLIC_") && !process.env[key]) {
+    if (key && !process.env[key]) {
       process.env[key] = value
     }
   }
 }
 
-loadRootPublicEnv()
+loadRootEnv()
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {

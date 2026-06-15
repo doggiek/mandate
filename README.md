@@ -49,6 +49,9 @@ npm run contract:test
 npm run dev
 ```
 
+Run `npm run dev` from the repository root. The web app loads environment
+variables from the root `.env.local`; do not copy secrets into `apps/web`.
+
 ## Testnet Deployment
 
 Publish contract:

@@ -27,7 +27,15 @@ NEXT_PUBLIC_PACKAGE_ID=<package_id>
 PACKAGE_ID=<package_id>
 ```
 
-Restart the Next.js dev server after updating `.env.local`.
+Restart the Next.js dev server from the repository root after updating
+`.env.local`:
+
+```bash
+npm run dev
+```
+
+The root `.env.local` is the single source of truth for local environment
+variables. Do not create a separate `apps/web/.env.local`.
 
 If you publish a new package instead of upgrading the existing one, recreate the
 Mandate object so its type belongs to the latest package.
