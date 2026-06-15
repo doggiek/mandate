@@ -15,6 +15,7 @@ import {
 import {
   Activity,
   BookOpen,
+  Bot,
   LayoutDashboard,
   ScrollText,
   ShieldCheck,
@@ -35,6 +36,12 @@ const NAV: {
     label: "Mandates",
     href: "/console/mandates",
     icon: ShieldCheck,
+  },
+  {
+    view: "automation",
+    label: "Automation",
+    href: "/console/automation",
+    icon: Bot,
   },
   {
     view: "activity",

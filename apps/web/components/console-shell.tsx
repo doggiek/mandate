@@ -14,18 +14,28 @@ import { OverviewView } from "@/components/views/overview-view"
 import { MandatesView } from "@/components/views/mandates-view"
 import { ActivityView } from "@/components/views/activity-view"
 import { OrdersView } from "@/components/views/orders-view"
+import { AutomationView } from "@/components/views/automation-view"
 import { CreateMandateDialog } from "@/components/create-mandate-dialog"
 import { MandateDetailSheet } from "@/components/mandate-detail-sheet"
 import { MandateStoreProvider } from "@/lib/mandate-store"
 import { Plus } from "lucide-react"
 import { usePathname, useRouter } from "next/navigation"
 
-export type ConsoleView = "overview" | "mandates" | "activity" | "orders"
+export type ConsoleView =
+  | "overview"
+  | "automation"
+  | "mandates"
+  | "activity"
+  | "orders"
 
 const VIEW_TITLES: Record<ConsoleView, { title: string; subtitle: string }> = {
   overview: {
     title: "Overview",
     subtitle: "Delegated spending authority across all agents",
+  },
+  automation: {
+    title: "Automation",
+    subtitle: "Configure test runs and interval execution",
   },
   mandates: {
     title: "Mandates",
@@ -57,6 +67,7 @@ export function ConsoleShell({
 
   const view = React.useMemo<ConsoleView>(() => {
     if (pathname === "/console/mandates") return "mandates"
+    if (pathname === "/console/automation") return "automation"
     if (pathname === "/console/activity") return "activity"
     if (pathname === "/console/orders") return "orders"
     if (pathname === "/console/overview") return "overview"
@@ -104,6 +115,7 @@ export function ConsoleShell({
                   onViewAll={() => router.push("/console/mandates")}
                 />
               )}
+              {view === "automation" && <AutomationView />}
               {view === "mandates" && (
                 <MandatesView
                   onSelectMandate={setDetailId}

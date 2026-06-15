@@ -2,7 +2,13 @@ import { notFound } from "next/navigation"
 
 import { ConsoleShell, type ConsoleView } from "@/components/console-shell"
 
-const VIEWS = new Set(["overview", "mandates", "activity", "orders"])
+const VIEWS = new Set([
+  "overview",
+  "automation",
+  "mandates",
+  "activity",
+  "orders",
+])
 
 export default async function ConsoleViewPage({
   params,

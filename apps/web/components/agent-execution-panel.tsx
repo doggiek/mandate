@@ -20,6 +20,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { CopyableId, shortId } from "@/components/copyable-id"
 import { ExplorerLink } from "@/components/explorer-link"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -38,6 +39,12 @@ import {
 } from "@/lib/chain-config"
 import { formatSui, stableExpiryLabel } from "@/lib/format"
 import { useMandateStore } from "@/lib/mandate-store"
+import {
+  SIGNAL_STRATEGIES,
+  defaultSignalStrategy,
+  signalStrategyById,
+  type SignalDirection,
+} from "@/lib/signal-strategies"
 import { cn } from "@/lib/utils"
 
 type AgentRunResult = {
@@ -76,6 +83,20 @@ type LastRunReceipt = {
 
 type AutoRunStatus = "off" | "running" | "stopped" | "error"
 type AutoRunInterval = "off" | "30000" | "60000" | "300000"
+type ExecutionMode = "test_only" | "auto_execute"
+type SignalStatus = {
+  strategyId: string
+  signalType: "price_momentum" | "volatility" | "whale_flow" | "ai_signal"
+  market: string
+  source: "mock" | "deepbook"
+  baselineValue: number
+  currentValue: number
+  changePct: number
+  thresholdPct: number
+  decision: "waiting" | "triggered"
+  reason: string
+  checkedAt: string
+}
 
 let lastRunReceipt: LastRunReceipt = {
   result: null,
@@ -128,6 +149,17 @@ const AUTO_RUN_INTERVALS: Array<{
   { label: "30s", value: "30000" },
   { label: "1m", value: "60000" },
   { label: "5m", value: "300000" },
+]
+
+const SIGNAL_DIRECTIONS: Array<{ label: string; value: SignalDirection }> = [
+  { label: "Up", value: "up" },
+  { label: "Down", value: "down" },
+  { label: "Either", value: "either" },
+]
+
+const EXECUTION_MODES: Array<{ label: string; value: ExecutionMode }> = [
+  { label: "Test only", value: "test_only" },
+  { label: "Auto execute", value: "auto_execute" },
 ]
 
 function ResultField({
@@ -349,6 +381,41 @@ function autoRunStatusClass(status: AutoRunStatus) {
   return "border-border bg-background/60 text-muted-foreground"
 }
 
+function signalDecisionClass(decision?: SignalStatus["decision"]) {
+  if (decision === "triggered") {
+    return "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
+  }
+  return "border-border bg-background/60 text-muted-foreground"
+}
+
+function formatSignalValue(value?: number) {
+  return typeof value === "number" ? value.toFixed(6) : "-"
+}
+
+function formatSignalChange(value?: number) {
+  if (typeof value !== "number") {
+    return "-"
+  }
+  return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`
+}
+
+function formatSignalCheckedAt(value?: string) {
+  if (!value) {
+    return "-"
+  }
+
+  const timestamp = Date.parse(value)
+  if (!Number.isFinite(timestamp)) {
+    return "-"
+  }
+
+  return new Intl.DateTimeFormat("en", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(timestamp)
+}
+
 function formatAutoRunTime(timestampMs?: number | null) {
   if (!timestampMs) {
     return "-"
@@ -390,15 +457,31 @@ export function AgentExecutionPanel() {
   const [autoStrategy, setAutoStrategy] = React.useState<StrategyKey>("normal")
   const [autoInterval, setAutoInterval] =
     React.useState<AutoRunInterval>("off")
+  const [signalStrategyId, setSignalStrategyId] = React.useState(
+    () => defaultSignalStrategy().id
+  )
+  const [signalDirection, setSignalDirection] =
+    React.useState<SignalDirection>(() => defaultSignalStrategy().direction)
+  const [signalThresholdPct, setSignalThresholdPct] = React.useState(() =>
+    String(defaultSignalStrategy().thresholdPct)
+  )
+  const [executionMode, setExecutionMode] =
+    React.useState<ExecutionMode>("test_only")
+  const [forceSignalTriggered, setForceSignalTriggered] = React.useState(false)
+  const [liveSignal, setLiveSignal] = React.useState<SignalStatus | null>(null)
+  const [isCheckingSignal, setIsCheckingSignal] = React.useState(false)
   const [autoStatus, setAutoStatus] = React.useState<AutoRunStatus>("off")
   const [autoMessage, setAutoMessage] = React.useState<string | null>(null)
   const [autoRunCount, setAutoRunCount] = React.useState(0)
+  const [autoCheckCount, setAutoCheckCount] = React.useState(0)
   const [autoLastDigest, setAutoLastDigest] = React.useState<string | null>(null)
   const [autoLastRunTime, setAutoLastRunTime] = React.useState<number | null>(null)
   const [autoNextRunAt, setAutoNextRunAt] = React.useState<number | null>(null)
   const [nowMs, setNowMs] = React.useState(() => Date.now())
   const autoTimerRef = React.useRef<number | null>(null)
   const autoInFlightRef = React.useRef(false)
+  const selectedSignalStrategy =
+    signalStrategyById(signalStrategyId) ?? defaultSignalStrategy()
 
   React.useEffect(() => {
     setResult(lastRunReceipt.result)
@@ -575,8 +658,16 @@ export function AgentExecutionPanel() {
     [agentWalletMatches, packageAllowed, protocolAllowed, selectedMandate]
   )
   const canRunAgent = validateRunStrategy(strategy).ok
+  const thresholdPct = React.useMemo(() => {
+    const parsed = Number(signalThresholdPct)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 5
+  }, [signalThresholdPct])
+  const thresholdValid = Number.isFinite(Number(signalThresholdPct)) && Number(signalThresholdPct) > 0
   const canStartAutoRun =
-    autoInterval !== "off" && validateRunStrategy(autoStrategy).ok
+    executionMode === "auto_execute" &&
+    autoInterval !== "off" &&
+    thresholdValid &&
+    validateRunStrategy(autoStrategy).ok
   const showMandateLoading = loading && selectableMandates.length === 0 && !result
 
   const clearRunResult = React.useCallback(() => {
@@ -635,6 +726,12 @@ export function AgentExecutionPanel() {
     }
   }, [autoStatus, autoStrategy, stopAutoRun, validateRunStrategy])
 
+  React.useEffect(() => {
+    if (autoStatus === "running" && executionMode !== "auto_execute") {
+      stopAutoRun("stopped", "Automation stopped after switching to Test only mode.")
+    }
+  }, [autoStatus, executionMode, stopAutoRun])
+
   const handleMandateChange = React.useCallback(
     (value: string | null) => {
       if (!value || value === selectedMandateId) {
@@ -661,6 +758,18 @@ export function AgentExecutionPanel() {
     },
     [clearRunResult, strategy]
   )
+
+  const handleSignalStrategyChange = React.useCallback((value: string) => {
+    const nextStrategy = signalStrategyById(value)
+    if (!nextStrategy || nextStrategy.status !== "available") {
+      return
+    }
+
+    setSignalStrategyId(nextStrategy.id)
+    setSignalDirection(nextStrategy.direction)
+    setSignalThresholdPct(String(nextStrategy.thresholdPct))
+    setLiveSignal(null)
+  }, [])
 
   const scheduleRefresh = React.useCallback(() => {
     window.setTimeout(() => {
@@ -847,6 +956,33 @@ export function AgentExecutionPanel() {
     void executeAgentRun(strategy)
   }, [executeAgentRun, strategy])
 
+  const checkSignal = React.useCallback(
+    async (force?: "triggered") => {
+      setIsCheckingSignal(true)
+      try {
+        const params = new URLSearchParams({
+          strategyId: selectedSignalStrategy.id,
+          thresholdPct: String(thresholdPct),
+          direction: signalDirection,
+        })
+        const forcedDecision = force ?? (forceSignalTriggered ? "triggered" : undefined)
+        if (forcedDecision) {
+          params.set("force", forcedDecision)
+        }
+        const response = await fetch(`/api/agent/signal?${params.toString()}`)
+        if (!response.ok) {
+          throw new Error("Unable to read market signal")
+        }
+        const signal = (await response.json()) as SignalStatus
+        setLiveSignal(signal)
+        return signal
+      } finally {
+        setIsCheckingSignal(false)
+      }
+    },
+    [forceSignalTriggered, selectedSignalStrategy.id, signalDirection, thresholdPct]
+  )
+
   const runAutoOnce = React.useCallback(async () => {
     if (autoInFlightRef.current) {
       return
@@ -859,6 +995,26 @@ export function AgentExecutionPanel() {
     }
 
     autoInFlightRef.current = true
+    let signal: SignalStatus
+    try {
+      signal = await checkSignal()
+      setAutoCheckCount((count) => count + 1)
+    } catch (caught) {
+      autoInFlightRef.current = false
+      stopAutoRun(
+        "error",
+        caught instanceof Error ? caught.message : "Signal check failed."
+      )
+      return
+    }
+
+    if (signal.decision !== "triggered") {
+      autoInFlightRef.current = false
+      setAutoMessage(signal.reason)
+      return
+    }
+
+    setAutoMessage("Signal triggered. Submitting backend agent execution.")
     const outcome = await executeAgentRun(autoStrategy)
     autoInFlightRef.current = false
 
@@ -883,13 +1039,23 @@ export function AgentExecutionPanel() {
     }
 
     stopAutoRun("error", outcome.error ?? "Auto Run failed.")
-  }, [autoStrategy, executeAgentRun, stopAutoRun, validateRunStrategy])
+  }, [autoStrategy, checkSignal, executeAgentRun, stopAutoRun, validateRunStrategy])
 
   const startAutoRun = React.useCallback(() => {
     const validation = validateRunStrategy(autoStrategy)
+    if (executionMode !== "auto_execute") {
+      setAutoStatus("error")
+      setAutoMessage("Switch execution mode to Auto execute before starting Automation.")
+      return
+    }
     if (autoInterval === "off") {
       setAutoStatus("error")
       setAutoMessage("Choose an interval before starting Auto Run.")
+      return
+    }
+    if (!thresholdValid) {
+      setAutoStatus("error")
+      setAutoMessage("Enter a positive signal threshold before starting Automation.")
       return
     }
     if (!validation.ok) {
@@ -901,11 +1067,19 @@ export function AgentExecutionPanel() {
     setAutoStatus("running")
     setAutoMessage(null)
     setAutoRunCount(0)
+    setAutoCheckCount(0)
     setAutoLastDigest(null)
     setAutoLastRunTime(null)
     setAutoNextRunAt(null)
     void runAutoOnce()
-  }, [autoInterval, autoStrategy, runAutoOnce, validateRunStrategy])
+  }, [
+    autoInterval,
+    autoStrategy,
+    executionMode,
+    runAutoOnce,
+    thresholdValid,
+    validateRunStrategy,
+  ])
 
   React.useEffect(() => {
     if (autoStatus !== "running" || autoInterval === "off") {
@@ -930,7 +1104,7 @@ export function AgentExecutionPanel() {
         autoTimerRef.current = null
       }
     }
-  }, [autoInterval, autoRunCount, autoStatus, runAutoOnce])
+  }, [autoCheckCount, autoInterval, autoStatus, runAutoOnce])
 
   const status = result?.status
   const isSuccess = status === "SUCCESS"
@@ -952,9 +1126,10 @@ export function AgentExecutionPanel() {
   return (
     <Card className="border-primary/15 bg-card/80">
       <CardHeader className="border-b border-border">
-        <CardTitle>Run Agent Strategy</CardTitle>
+        <CardTitle>Automation</CardTitle>
         <CardDescription>
-          Manual or scheduled backend execution under the selected Mandate policy.
+          Test Run validates the selected Mandate and strategy. Automation
+          evaluates on an interval and executes with the backend Trading Agent.
         </CardDescription>
         <CardAction>
           <Button
@@ -967,7 +1142,7 @@ export function AgentExecutionPanel() {
             ) : (
               <Play data-icon="inline-start" />
             )}
-            {isRunning ? "Running" : "Run Agent"}
+            {isRunning ? "Testing" : "Test Run"}
           </Button>
         </CardAction>
       </CardHeader>
@@ -1081,7 +1256,7 @@ export function AgentExecutionPanel() {
 
         <section className="flex flex-col gap-3">
           <h3 className="text-sm font-semibold text-foreground">
-            Select Strategy
+            Signal Strategy config
           </h3>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {Object.entries(STRATEGIES).map(([key, option]) => {
@@ -1139,19 +1314,280 @@ export function AgentExecutionPanel() {
             <AlertCircle className="size-4 text-amber-400" />
             <AlertTitle>Create an active mandate before running the agent.</AlertTitle>
             <AlertDescription>
-              Run Agent needs an active shared Mandate object from the current
+              Test Run needs an active shared Mandate object from the current
               wallet so the backend PTB can authorize spend against the right id.
             </AlertDescription>
           </Alert>
         )}
 
         <section className="flex flex-col gap-3 rounded-lg border border-border bg-background/45 p-3">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">
+              Signal Strategy
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Signal Engine → Trigger Decision → Mandate Policy Gate → Backend
+              Agent Execution → On-chain Activity
+            </p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {SIGNAL_STRATEGIES.map((option) => {
+              const selected = option.id === selectedSignalStrategy.id
+              const available = option.status === "available"
+
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  disabled={!available}
+                  onClick={() => handleSignalStrategyChange(option.id)}
+                  className={cn(
+                    "flex min-h-[132px] flex-col items-start gap-2 rounded-lg border bg-background/60 p-3 text-left transition",
+                    available &&
+                      "hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
+                    !available &&
+                      "cursor-not-allowed opacity-55 hover:border-border hover:bg-background/60",
+                    selected
+                      ? "border-cyan-400/50 bg-cyan-400/10 shadow-[0_0_24px_rgba(34,211,238,0.08)]"
+                      : "border-border"
+                  )}
+                >
+                  <div className="flex w-full items-start justify-between gap-2">
+                    <span className="text-sm font-semibold text-foreground">
+                      {option.name}
+                    </span>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "shrink-0 text-[11px]",
+                        available
+                          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
+                          : "border-border text-muted-foreground"
+                      )}
+                    >
+                      {available ? "Available" : "Coming soon"}
+                    </Badge>
+                  </div>
+                  <span className="text-xs leading-snug text-muted-foreground">
+                    {option.description}
+                  </span>
+                  <span className="mt-auto text-xs text-muted-foreground">
+                    {option.actionLabel}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </section>
+
+        <section className="flex flex-col gap-3 rounded-lg border border-border bg-background/45 p-3">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">
+              Trigger Conditions
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Demo signal source; replaceable with DeepBook quote or oracle feed.
+            </p>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <SummaryChip label="Market" value={selectedSignalStrategy.market} mono />
+            <SummaryChip
+              label="Signal type"
+              value={selectedSignalStrategy.signalType.replaceAll("_", " ")}
+            />
+            <SummaryChip
+              label="Action"
+              value={selectedSignalStrategy.actionLabel}
+            />
+            <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
+              <span className="text-xs text-muted-foreground">Direction</span>
+              <Select
+                value={signalDirection}
+                onValueChange={(value) => setSignalDirection(value as SignalDirection)}
+              >
+                <SelectTrigger className="mt-2 h-8 w-full bg-background/70">
+                  <span className="truncate text-left text-sm">
+                    {
+                      SIGNAL_DIRECTIONS.find(
+                        (option) => option.value === signalDirection
+                      )?.label
+                    }
+                  </span>
+                </SelectTrigger>
+                <SelectContent align="start">
+                  <SelectGroup>
+                    {SIGNAL_DIRECTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
+              <span className="text-xs text-muted-foreground">Threshold</span>
+              <div className="mt-2 flex items-center gap-2">
+                <Input
+                  type="number"
+                  min="0.1"
+                  step="0.1"
+                  value={signalThresholdPct}
+                  onChange={(event) => setSignalThresholdPct(event.target.value)}
+                  className="h-8 bg-background/70"
+                />
+                <span className="text-xs text-muted-foreground">%</span>
+              </div>
+            </div>
+            <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
+              <span className="text-xs text-muted-foreground">Check interval</span>
+              <Select
+                value={autoInterval}
+                onValueChange={(value) => {
+                  if (autoStatus === "running") {
+                    stopAutoRun("stopped", "Automation stopped after interval change.")
+                  }
+                  setAutoInterval(value as AutoRunInterval)
+                }}
+              >
+                <SelectTrigger className="mt-2 h-8 w-full bg-background/70">
+                  <span className="truncate text-left text-sm">
+                    {selectedAutoIntervalLabel}
+                  </span>
+                </SelectTrigger>
+                <SelectContent align="start">
+                  <SelectGroup>
+                    {AUTO_RUN_INTERVALS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
+              <span className="text-xs text-muted-foreground">Execution mode</span>
+              <Select
+                value={executionMode}
+                onValueChange={(value) => setExecutionMode(value as ExecutionMode)}
+              >
+                <SelectTrigger className="mt-2 h-8 w-full bg-background/70">
+                  <span className="truncate text-left text-sm">
+                    {
+                      EXECUTION_MODES.find(
+                        (option) => option.value === executionMode
+                      )?.label
+                    }
+                  </span>
+                </SelectTrigger>
+                <SelectContent align="start">
+                  <SelectGroup>
+                    {EXECUTION_MODES.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
+              <span className="text-xs text-muted-foreground">
+                Demo force
+              </span>
+              <Button
+                type="button"
+                variant={forceSignalTriggered ? "default" : "outline"}
+                onClick={() => setForceSignalTriggered((value) => !value)}
+                className="mt-2 h-8 justify-start"
+              >
+                {forceSignalTriggered ? "force=triggered" : "Off"}
+              </Button>
+            </div>
+          </div>
+        </section>
+
+        <section className="flex flex-col gap-3 rounded-lg border border-border bg-background/45 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">
+                Live Signal status
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                Demo signal source; replaceable with DeepBook quote or oracle
+                feed. Use
+                <span className="font-mono"> /api/agent/signal?force=triggered </span>
+                for demo triggering.
+              </p>
+            </div>
+            <Badge
+              variant="outline"
+              className={cn("w-fit font-medium", signalDecisionClass(liveSignal?.decision))}
+            >
+              {isCheckingSignal
+                ? "Checking"
+                : liveSignal?.decision
+                  ? liveSignal.decision
+                  : "waiting"}
+            </Badge>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <SummaryChip
+              label="Signal source"
+              value={liveSignal?.source ?? "mock"}
+            />
+            <SummaryChip
+              label="Signal type"
+              value={
+                liveSignal?.signalType.replaceAll("_", " ") ??
+                selectedSignalStrategy.signalType.replaceAll("_", " ")
+              }
+            />
+            <SummaryChip
+              label="Market"
+              value={liveSignal?.market ?? selectedSignalStrategy.market}
+              mono
+            />
+            <SummaryChip
+              label="Baseline"
+              value={formatSignalValue(liveSignal?.baselineValue)}
+              mono
+            />
+            <SummaryChip
+              label="Current"
+              value={formatSignalValue(liveSignal?.currentValue)}
+              mono
+            />
+            <SummaryChip
+              label="Change"
+              value={formatSignalChange(liveSignal?.changePct)}
+              mono
+            />
+            <SummaryChip
+              label="Decision"
+              value={liveSignal?.decision ?? "-"}
+            />
+            <SummaryChip
+              label="Last checked"
+              value={formatSignalCheckedAt(liveSignal?.checkedAt)}
+              mono
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {liveSignal?.reason ?? "No signal check has run yet."}
+          </p>
+        </section>
+
+        <section className="flex flex-col gap-3 rounded-lg border border-border bg-background/45 p-3">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h3 className="text-sm font-semibold text-foreground">Auto Run</h3>
+              <h3 className="text-sm font-semibold text-foreground">Automation controls</h3>
               <p className="text-xs text-muted-foreground">
-                Let the backend Trading Agent run this strategy on an interval
-                while the Mandate remains active.
+                Start signal polling. A transaction is submitted only when the
+                live signal decision is triggered.
               </p>
             </div>
             <Badge
@@ -1162,10 +1598,10 @@ export function AgentExecutionPanel() {
             </Badge>
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-[1.4fr_0.8fr_auto]">
+          <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
             <div className="flex flex-col gap-1.5">
               <span className="text-xs font-medium text-muted-foreground">
-                Strategy
+                Automation strategy
               </span>
               <Select
                 value={autoStrategy}
@@ -1203,36 +1639,6 @@ export function AgentExecutionPanel() {
                         </SelectItem>
                       )
                     })}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                Interval
-              </span>
-              <Select
-                value={autoInterval}
-                onValueChange={(value) => {
-                  if (autoStatus === "running") {
-                    stopAutoRun("stopped", "Auto Run stopped after interval change.")
-                  }
-                  setAutoInterval(value as AutoRunInterval)
-                }}
-              >
-                <SelectTrigger className="h-9 w-full bg-background/70">
-                  <span className="truncate text-left text-sm">
-                    {selectedAutoIntervalLabel}
-                  </span>
-                </SelectTrigger>
-                <SelectContent align="start">
-                  <SelectGroup>
-                    {AUTO_RUN_INTERVALS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
                   </SelectGroup>
                 </SelectContent>
               </Select>

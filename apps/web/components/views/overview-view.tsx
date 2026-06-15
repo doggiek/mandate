@@ -10,7 +10,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { AgentExecutionPanel } from "@/components/agent-execution-panel";
 import { MandateTable } from "@/components/mandate-table";
 import { ActivityFeed } from "@/components/activity-feed";
 import { CopyableId } from "@/components/copyable-id";
@@ -69,46 +68,10 @@ function ConsoleOverviewSkeleton() {
   );
 }
 
-function RunAgentSkeleton() {
-  return (
-    <Card className="border-primary/15 bg-card/80">
-      <CardHeader className="border-b border-border">
-        <Skeleton className="h-5 w-44" />
-        <Skeleton className="h-3 w-80 max-w-full" />
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4 p-4">
-        <Skeleton className="h-8 w-full rounded-lg" />
-        <section className="flex flex-col gap-3">
-          <Skeleton className="h-4 w-28" />
-          <Skeleton className="h-12 w-full rounded-lg" />
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <Skeleton key={index} className="h-[58px] rounded-lg" />
-            ))}
-          </div>
-        </section>
-        <section className="flex flex-col gap-3">
-          <Skeleton className="h-4 w-28" />
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, index) => (
-              <Skeleton key={index} className="h-[132px] rounded-lg" />
-            ))}
-          </div>
-        </section>
-        <section className="flex flex-col gap-3">
-          <Skeleton className="h-4 w-32" />
-          <Skeleton className="h-20 w-full rounded-lg" />
-        </section>
-      </CardContent>
-    </Card>
-  );
-}
-
 function OverviewSkeleton() {
   return (
     <div className="flex flex-col gap-4">
       <ConsoleOverviewSkeleton />
-      <RunAgentSkeleton />
       <OverviewListSkeleton />
     </div>
   );
@@ -320,7 +283,29 @@ export function OverviewView({
         </p>
       </section>
 
-      <AgentExecutionPanel />
+      <Card className="border-primary/15 bg-card/80">
+        <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-foreground">
+              Automation
+            </h3>
+            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+              Configure manual test runs or interval execution for the backend
+              Trading Agent under a selected Mandate policy.
+            </p>
+          </div>
+          <Link
+            href="/console/automation"
+            className={buttonVariants({
+              className:
+                "shrink-0 bg-primary text-primary-foreground hover:bg-primary/90",
+            })}
+          >
+            Configure Automation
+            <ArrowRight data-icon="inline-end" />
+          </Link>
+        </CardContent>
+      </Card>
 
       {error && (
         <Card className="border-destructive/30">
