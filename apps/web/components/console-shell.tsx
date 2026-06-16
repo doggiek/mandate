@@ -31,7 +31,8 @@ export type ConsoleView =
 const VIEW_TITLES: Record<ConsoleView, { title: string; subtitle: string }> = {
   overview: {
     title: "Overview",
-    subtitle: "Delegated spending authority across all agents",
+    subtitle:
+      "Autonomous trading mandates, policy limits, and on-chain execution proof.",
   },
   automation: {
     title: "Automation",

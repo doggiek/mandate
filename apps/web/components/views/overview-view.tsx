@@ -1,6 +1,13 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
+import { ArrowRight, ChevronRight, ShieldOff } from "lucide-react";
+
+import { ActivityFeed } from "@/components/activity-feed";
+import { BudgetMeter } from "@/components/budget-meter";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardAction,
@@ -9,138 +16,194 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Button, buttonVariants } from "@/components/ui/button";
-import { MandateTable } from "@/components/mandate-table";
-import { ActivityFeed } from "@/components/activity-feed";
 import { CopyableId } from "@/components/copyable-id";
-import { ExplorerLink } from "@/components/explorer-link";
+import { ExplorerLink, transactionUrl } from "@/components/explorer-link";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StatusBadge } from "@/components/status-badges";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { sortActivitiesByTimeDesc } from "@/lib/activity-utils";
-import { formatSui } from "@/lib/format";
+import { formatSui, stableExpiryLabel } from "@/lib/format";
 import { useMandateStore } from "@/lib/mandate-store";
-import { ArrowRight, Plus } from "lucide-react";
-import Link from "next/link";
-
-function SummaryMetricSkeleton() {
-  return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, index) => (
-        <div
-          key={index}
-          className="min-h-[92px] rounded-xl border border-border bg-card p-3"
-        >
-          <Skeleton className="h-3 w-24" />
-          <Skeleton className="mt-3 h-6 w-24" />
-          <Skeleton className="mt-2 h-3 w-32" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function MiniMetricsSkeleton() {
-  return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      {Array.from({ length: 3 }).map((_, index) => (
-        <div
-          key={index}
-          className="min-h-[92px] rounded-xl border border-border bg-card/50 p-3"
-        >
-          <Skeleton className="h-3 w-24" />
-          <Skeleton className="mt-3 h-6 w-24" />
-          <Skeleton className="mt-2 h-3 w-32" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ConsoleOverviewSkeleton() {
-  return (
-    <section className="flex flex-col gap-3">
-      <div>
-        <Skeleton className="h-5 w-40" />
-        <Skeleton className="mt-2 h-3 w-72" />
-      </div>
-      <SummaryMetricSkeleton />
-      <MiniMetricsSkeleton />
-    </section>
-  );
-}
+import { cn } from "@/lib/utils";
+import type { Mandate } from "@/lib/mandate-data";
 
 function OverviewSkeleton() {
   return (
     <div className="flex flex-col gap-4">
-      <ConsoleOverviewSkeleton />
-      <OverviewListSkeleton />
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="space-y-2">
+          <Skeleton className="h-7 w-40" />
+          <Skeleton className="h-4 w-[420px] max-w-full" />
+        </div>
+        <Skeleton className="h-9 w-44" />
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+        {Array.from({ length: 6 }).map((_, index) => (
+          <Skeleton key={index} className="h-28 rounded-xl" />
+        ))}
+      </div>
+      <Skeleton className="h-72 rounded-xl" />
+      <Skeleton className="h-80 rounded-xl" />
     </div>
   );
 }
 
-function SummaryMetricCard({
+function SummaryMetric({
   label,
   value,
   helper,
-  mini = false,
-  title,
+  valueClassName,
 }: {
   label: string;
   value: React.ReactNode;
   helper: string;
-  mini?: boolean;
-  title?: string;
+  valueClassName?: string;
 }) {
   return (
-    <div
-      className={
-        mini
-          ? "flex min-h-[92px] min-w-0 flex-col justify-between rounded-xl border border-border bg-card/50 p-3"
-          : "flex min-h-[92px] min-w-0 flex-col justify-between rounded-xl border border-border bg-card p-3"
-      }
-    >
-      <p className="truncate text-xs text-muted-foreground">{label}</p>
-      <div
-        className="mt-2 min-w-0 truncate font-mono text-xl font-semibold leading-tight tracking-tight text-foreground"
-        title={title}
-      >
-        {value}
-      </div>
-      <p className="mt-1 truncate text-[11px] text-muted-foreground/70">
-        {helper}
-      </p>
-    </div>
+    <Card className="min-h-[112px] border-border/80 bg-card/80">
+      <CardContent className="flex h-full flex-col justify-between p-3.5">
+        <div className="truncate text-xs text-muted-foreground">{label}</div>
+        <div
+          className={cn(
+            "mt-3 min-w-0 truncate font-mono text-lg font-semibold text-foreground",
+            valueClassName,
+          )}
+        >
+          {value}
+        </div>
+        <div className="mt-2 truncate text-xs text-muted-foreground/75">
+          {helper}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
-function OverviewListSkeleton() {
+function OverviewMandatesTable({
+  mandates,
+  onSelect,
+}: {
+  mandates: Mandate[];
+  onSelect: (id: string) => void;
+}) {
   return (
-    <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-      <Card className="lg:col-span-2">
-        <CardHeader className="border-b border-border">
-          <Skeleton className="h-5 w-36" />
-          <Skeleton className="h-3 w-60" />
-        </CardHeader>
-        <CardContent className="space-y-3 p-4">
-          {Array.from({ length: 4 }).map((_, index) => (
-            <Skeleton key={index} className="h-12 w-full rounded-lg" />
+    <div className="overflow-hidden">
+      <Table>
+        <TableHeader>
+          <TableRow className="border-border/70 hover:bg-transparent">
+            <TableHead className="pl-4">Mandate</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead className="w-[160px]">Budget used</TableHead>
+            <TableHead className="hidden md:table-cell">Protocols</TableHead>
+            <TableHead className="hidden lg:table-cell">Created</TableHead>
+            <TableHead className="hidden lg:table-cell">Expires</TableHead>
+            <TableHead className="w-[140px] pr-3 text-center">
+              Actions
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {mandates.map((mandate) => (
+            <TableRow key={mandate.id} className="border-border/70">
+              <TableCell className="pl-4">
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <span className="truncate font-medium leading-tight">
+                    {mandate.label}
+                  </span>
+                  <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                    <CopyableId value={mandate.id} label="mandate id" />
+                  </span>
+                </div>
+              </TableCell>
+              <TableCell>
+                <StatusBadge status={mandate.status} />
+              </TableCell>
+              <TableCell>
+                <BudgetMeter spent={mandate.spent} budget={mandate.budget} />
+              </TableCell>
+              <TableCell className="hidden md:table-cell">
+                <div className="flex flex-wrap gap-1">
+                  {mandate.protocols.slice(0, 2).map((protocol) => (
+                    <Badge
+                      key={protocol}
+                      variant="secondary"
+                      className="bg-secondary font-normal text-secondary-foreground"
+                    >
+                      {protocol}
+                    </Badge>
+                  ))}
+                  {mandate.protocols.length > 2 && (
+                    <Badge
+                      variant="secondary"
+                      className="bg-secondary font-normal"
+                    >
+                      +{mandate.protocols.length - 2}
+                    </Badge>
+                  )}
+                </div>
+              </TableCell>
+              <TableCell className="hidden lg:table-cell">
+                <span className="text-sm text-muted-foreground tabular-nums">
+                  {mandate.createdAtDisplay ?? "-"}
+                </span>
+              </TableCell>
+              <TableCell className="hidden lg:table-cell">
+                <span
+                  className={cn(
+                    "text-sm tabular-nums",
+                    mandate.status === "expired"
+                      ? "text-muted-foreground"
+                      : "text-foreground",
+                  )}
+                >
+                  {mandate.expiresLabel ??
+                    stableExpiryLabel(mandate.expiresAt, mandate.status)}
+                </span>
+              </TableCell>
+              <TableCell className="pr-3 text-right">
+                <div className="flex items-center justify-end gap-2">
+                  <Link
+                    href={`/console/automation?mandateId=${mandate.id}`}
+                    className={buttonVariants({
+                      variant: "outline",
+                      size: "sm",
+                      className: "h-8 gap-1.5",
+                    })}
+                  >
+                    Automation
+                    <ArrowRight data-icon="inline-end" />
+                  </Link>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="size-8"
+                    onClick={() => onSelect(mandate.id)}
+                    aria-label={`Open ${mandate.label} details`}
+                  >
+                    <ChevronRight className="size-4" />
+                  </Button>
+                </div>
+              </TableCell>
+            </TableRow>
           ))}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader className="border-b border-border">
-          <Skeleton className="h-5 w-32" />
-          <Skeleton className="h-3 w-40" />
-        </CardHeader>
-        <CardContent className="space-y-4 p-4">
-          {Array.from({ length: 5 }).map((_, index) => (
-            <div key={index} className="space-y-2">
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-3 w-2/3" />
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-    </section>
+        </TableBody>
+      </Table>
+    </div>
   );
 }
 
@@ -155,25 +218,28 @@ export function OverviewView({
 }) {
   const { mandates, activity, orders, loading, error, isWalletScoped } =
     useMandateStore();
+
   const activeMandates = React.useMemo(
-    () => mandates.filter((m) => m.status === "active"),
+    () => mandates.filter((mandate) => mandate.status === "active"),
     [mandates],
   );
 
-  const stats = React.useMemo(() => {
-    const activeAgentKeys = new Set(
-      activeMandates
-        .map((mandate) => mandate.agentAddress)
-        .filter((address): address is string => Boolean(address))
-        .map((address) => address.toLowerCase()),
-    );
-    const authorizedBudget = activeMandates.reduce(
-      (sum, mandate) => sum + mandate.budget,
-      0,
-    );
-    const successfulOrders = orders.filter(
-      (order) => order.status !== "failed",
-    );
+  const successfulOrders = React.useMemo(
+    () => orders.filter((order) => order.status !== "failed"),
+    [orders],
+  );
+
+  const sortedOrders = React.useMemo(
+    () => [...successfulOrders].sort((a, b) => b.timestamp - a.timestamp),
+    [successfulOrders],
+  );
+
+  const recentActivity = React.useMemo(
+    () => sortActivitiesByTimeDesc(activity).slice(0, 5),
+    [activity],
+  );
+
+  const summary = React.useMemo(() => {
     const totalExecutedAmount = successfulOrders.reduce(
       (sum, order) => sum + (order.amountSui ?? 0),
       0,
@@ -185,25 +251,17 @@ export function OverviewView({
       (sum, event) => sum + (event.amountSui ?? event.amount ?? 0),
       0,
     );
-    const latestExecution = [...successfulOrders].sort(
-      (a, b) => b.timestamp - a.timestamp,
-    )[0];
 
     return {
-      activeAgents: activeAgentKeys.size,
       activeMandates: activeMandates.length,
-      authorizedBudget,
-      deepBookExecutions: successfulOrders.length,
       totalExecutedAmount,
-      blockedActions: blockedActivities.length,
       totalBlockedAmount,
-      latestExecution,
+      deepBookExecutions: successfulOrders.length,
+      blockedActions: blockedActivities.length,
+      latestExecution: sortedOrders[0],
     };
-  }, [activeMandates, activity, orders]);
-  const recentActivity = React.useMemo(
-    () => sortActivitiesByTimeDesc(activity).slice(0, 5),
-    [activity],
-  );
+  }, [activeMandates.length, activity, sortedOrders, successfulOrders]);
+
   const isInitialLoading =
     loading &&
     mandates.length === 0 &&
@@ -216,96 +274,66 @@ export function OverviewView({
 
   return (
     <div className="flex flex-col gap-4">
-      <section className="flex flex-col gap-3">
-        <div>
-          <h2 className="text-base font-semibold text-foreground">Summary</h2>
-          <p className="text-sm text-muted-foreground">
-            Delegated agent spending, executions, and policy blocks
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="font-heading text-base font-medium leading-snug text-foreground">
+            Autonomous Execution Summary
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Track autonomous spend, policy blocks, DeepBook executions, and
+            on-chain proof.
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <SummaryMetricCard
-            label="Active Agents"
-            value={String(stats.activeAgents)}
-            helper="Authorized executors"
-          />
-          <SummaryMetricCard
-            label="Active Mandates"
-            value={String(stats.activeMandates)}
-            helper={`${formatSui(stats.authorizedBudget)} delegated`}
-          />
-          <SummaryMetricCard
-            label="Executed Volume"
-            value={formatSui(stats.totalExecutedAmount)}
-            helper={`${stats.deepBookExecutions} DeepBook runs`}
-          />
-          <SummaryMetricCard
-            label="Blocked Volume"
-            value={formatSui(stats.totalBlockedAmount)}
-            helper={`${stats.blockedActions} policy blocks`}
-          />
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <SummaryMetricCard
-            mini
-            label="DeepBook Executions"
-            value={String(stats.deepBookExecutions)}
-            helper="Successful swaps"
-          />
-          <SummaryMetricCard
-            mini
-            label="Blocked Actions"
-            value={String(stats.blockedActions)}
-            helper="Prevented by policy"
-          />
-          <SummaryMetricCard
-            mini
-            label="Latest Execution"
-            value={
-              stats.latestExecution?.digest ? (
-                <span className="inline-flex min-w-0 items-center gap-1">
-                  <CopyableId
-                    value={stats.latestExecution.digest}
-                    label="latest execution digest"
-                  />
-                  <ExplorerLink digest={stats.latestExecution.digest} />
-                </span>
-              ) : (
-                "-"
-              )
-            }
-            helper="Most recent successful PTB"
-          />
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Policy rules: Max tx, budget, expiry, and revoke are enforced before
-          execution.
-        </p>
-      </section>
+      </div>
 
-      <Card className="border-primary/15 bg-card/80">
-        <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-foreground">
-              Automation
-            </h3>
-            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-              Configure manual test runs or interval execution for the backend
-              Trading Agent under a selected Mandate policy.
-            </p>
-          </div>
-          <Link
-            href="/console/automation"
-            className={buttonVariants({
-              className:
-                "shrink-0 bg-primary text-primary-foreground hover:bg-primary/90",
-            })}
-          >
-            Configure Automation
-            <ArrowRight data-icon="inline-end" />
-          </Link>
-        </CardContent>
-      </Card>
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+        <SummaryMetric
+          label="Active Mandates"
+          value={String(summary.activeMandates)}
+          helper="Active permissions"
+        />
+        <SummaryMetric
+          label="Executed Volume"
+          value={formatSui(summary.totalExecutedAmount)}
+          helper="Approved autonomous spend"
+        />
+        <SummaryMetric
+          label="Blocked Volume"
+          value={formatSui(summary.totalBlockedAmount)}
+          helper="Prevented by policy"
+        />
+        <SummaryMetric
+          label="DeepBook Executions"
+          value={String(summary.deepBookExecutions)}
+          helper="Successful swaps"
+        />
+        <SummaryMetric
+          label="Blocked Actions"
+          value={String(summary.blockedActions)}
+          helper="Policy blocks"
+        />
+        <SummaryMetric
+          label="Latest Execution"
+          value={
+            summary.latestExecution?.digest ? (
+              <span className="flex min-w-0 flex-col items-start gap-1.5">
+                <span className="inline-flex min-w-0 max-w-full items-center gap-1">
+                  <CopyableId
+                    value={summary.latestExecution.digest}
+                    label="latest execution digest"
+                    className="min-w-0"
+                  />
+                  <ExplorerLink digest={summary.latestExecution.digest} />
+                </span>
+              </span>
+            ) : (
+              "-"
+            )
+          }
+          helper="Latest successful PTB"
+          valueClassName="whitespace-normal font-normal"
+        />
+      </section>
 
       {error && (
         <Card className="border-destructive/30">
@@ -315,83 +343,87 @@ export function OverviewView({
         </Card>
       )}
 
-      {isWalletScoped && activeMandates.length === 0 && (
-        <Card className="border-primary/15 bg-card/80">
-          <CardContent className="grid gap-3 p-4 sm:grid-cols-4">
-            {[
-              "Step 1. Create a Mandate",
-              "Step 2. Run the Agent",
-              "Step 3. Inspect ActivityEvent and DeepBook execution",
-              "Step 4. Revoke authority",
-            ].map((step) => (
-              <div
-                key={step}
-                className="rounded-lg border border-border bg-background/60 p-3 text-sm font-medium text-foreground"
-              >
-                {step}
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader className="border-b border-border">
-            <CardTitle>Active mandates</CardTitle>
-            <CardDescription>
-              Permissions currently delegated to autonomous agents
-            </CardDescription>
-            <CardAction>
-              <Button variant="ghost" size="sm" onClick={onViewAll}>
-                View all
-                <ArrowRight data-icon="inline-end" />
-              </Button>
-            </CardAction>
-          </CardHeader>
-          <CardContent className="p-0">
-            {activeMandates.length > 0 ? (
-              <div className="p-3">
-                <MandateTable
-                  mandates={activeMandates.slice(0, 4)}
-                  onSelect={onSelectMandate}
-                />
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
-                <p className="text-sm text-muted-foreground">
+      <Card>
+        <CardHeader className="border-b border-border">
+          <CardTitle>Active Mandates</CardTitle>
+          <CardDescription>
+            Active policy-protected vault permissions available to the Trading
+            Agent.
+          </CardDescription>
+          <CardAction>
+            <Button variant="ghost" size="sm" onClick={onViewAll}>
+              View all
+              <ArrowRight data-icon="inline-end" />
+            </Button>
+          </CardAction>
+        </CardHeader>
+        <CardContent className="p-0">
+          {activeMandates.length > 0 ? (
+            <OverviewMandatesTable
+              mandates={activeMandates}
+              onSelect={onSelectMandate}
+            />
+          ) : (
+            <Empty className="rounded-none border-0 py-12">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <ShieldOff />
+                </EmptyMedia>
+                <EmptyTitle>
                   {isWalletScoped
-                    ? "No mandates yet. Create a mandate to grant an agent capped DeepBook authority."
-                    : "No active mandates yet."}
-                </p>
-                <Button size="sm" onClick={onCreate}>
-                  <Plus data-icon="inline-start" />
-                  Create Mandate
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                    ? "No active mandates"
+                    : "Connect wallet to view mandates"}
+                </EmptyTitle>
+                <EmptyDescription>
+                  {isWalletScoped
+                    ? "Create a mandate to fund a capped vault and authorize autonomous DeepBook execution."
+                    : "Connect an owner wallet to inspect active spending mandates."}
+                </EmptyDescription>
+                {isWalletScoped && (
+                  <Button size="sm" onClick={onCreate}>
+                    Create Mandate
+                  </Button>
+                )}
+              </EmptyHeader>
+            </Empty>
+          )}
+        </CardContent>
+      </Card>
 
-        <Card>
-          <CardHeader className="border-b border-border">
-            <CardTitle>Recent activity</CardTitle>
-            <CardDescription>Latest on-chain actions</CardDescription>
-            <CardAction>
-              <Link
-                href="/console/activity"
-                className={buttonVariants({ variant: "ghost", size: "sm" })}
-              >
-                View all
-                <ArrowRight data-icon="inline-end" />
-              </Link>
-            </CardAction>
-          </CardHeader>
-          <CardContent className="py-0">
+      <Card>
+        <CardHeader className="border-b border-border">
+          <CardTitle>Recent Activity</CardTitle>
+          <CardDescription>
+            On-chain activity proof from Mandate policy objects.
+          </CardDescription>
+          <CardAction>
+            <Link
+              href="/console/activity"
+              className={buttonVariants({ variant: "ghost", size: "sm" })}
+            >
+              View all
+              <ArrowRight data-icon="inline-end" />
+            </Link>
+          </CardAction>
+        </CardHeader>
+        <CardContent className="py-0">
+          {recentActivity.length > 0 ? (
             <ActivityFeed events={recentActivity} />
-          </CardContent>
-        </Card>
-      </section>
+          ) : (
+            <Empty className="rounded-none border-0 py-12">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <ShieldOff />
+                </EmptyMedia>
+                <EmptyTitle>No on-chain activity yet</EmptyTitle>
+                <EmptyDescription>
+                  Create or run a mandate to generate ActivityEvents.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

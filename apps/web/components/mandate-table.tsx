@@ -1,6 +1,6 @@
-"use client"
+"use client";
 
-import { useCurrentAccount } from "@mysten/dapp-kit"
+import { useCurrentAccount } from "@mysten/dapp-kit";
 import {
   Table,
   TableBody,
@@ -8,34 +8,34 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { StatusBadge } from "@/components/status-badges"
-import { BudgetMeter } from "@/components/budget-meter"
-import { CopyableId } from "@/components/copyable-id"
-import { cn } from "@/lib/utils"
-import { stableExpiryLabel } from "@/lib/format"
+} from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/status-badges";
+import { BudgetMeter } from "@/components/budget-meter";
+import { CopyableId } from "@/components/copyable-id";
+import { cn } from "@/lib/utils";
+import { stableExpiryLabel } from "@/lib/format";
 import {
   isCurrentMandateObjectType,
   normalizeSuiAddress,
-} from "@/lib/chain-config"
-import type { Mandate } from "@/lib/mandate-data"
-import { ChevronRight, ShieldOff } from "lucide-react"
+} from "@/lib/chain-config";
+import type { Mandate } from "@/lib/mandate-data";
+import { ChevronRight, ShieldOff } from "lucide-react";
 
 const OLD_PACKAGE_MESSAGE =
-  "This mandate was created by an older package. Create a new mandate with the latest package to revoke or test policy actions."
+  "This mandate was created by an older package. Create a new mandate with the latest package to revoke or test policy actions.";
 
 export function MandateTable({
   mandates,
   onSelect,
   onRevoke,
 }: {
-  mandates: Mandate[]
-  onSelect: (id: string) => void
-  onRevoke?: (id: string) => void
+  mandates: Mandate[];
+  onSelect: (id: string) => void;
+  onRevoke?: (id: string) => void;
 }) {
-  const account = useCurrentAccount()
+  const account = useCurrentAccount();
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
@@ -44,22 +44,25 @@ export function MandateTable({
           <TableRow className="border-border hover:bg-transparent">
             <TableHead className="pl-4">Mandate</TableHead>
             <TableHead>Status</TableHead>
-            <TableHead className="w-[180px]">Budget used</TableHead>
+            <TableHead className="w-[160px]">Budget used</TableHead>
             <TableHead className="hidden md:table-cell">Protocols</TableHead>
             <TableHead className="hidden lg:table-cell">Created</TableHead>
             <TableHead className="hidden lg:table-cell">Expires</TableHead>
-            <TableHead className="w-[150px] pr-3 text-right">Actions</TableHead>
+            <TableHead className="w-[150px] pr-3 text-center">
+              Actions
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {mandates.map((m) => {
             const isKnownOlderPackage =
-              Boolean(m.objectType) && !isCurrentMandateObjectType(m.objectType)
+              Boolean(m.objectType) &&
+              !isCurrentMandateObjectType(m.objectType);
             const isOwnerWallet =
               !m.ownerAddress ||
               normalizeSuiAddress(account?.address) ===
-                normalizeSuiAddress(m.ownerAddress)
-            const canRevoke = !isKnownOlderPackage && isOwnerWallet
+                normalizeSuiAddress(m.ownerAddress);
+            const canRevoke = !isKnownOlderPackage && isOwnerWallet;
 
             return (
               <TableRow
@@ -122,7 +125,7 @@ export function MandateTable({
                       "text-sm tabular-nums",
                       m.status === "expired"
                         ? "text-muted-foreground"
-                        : "text-foreground"
+                        : "text-foreground",
                     )}
                   >
                     {m.expiresLabel ?? stableExpiryLabel(m.expiresAt, m.status)}
@@ -135,9 +138,9 @@ export function MandateTable({
                         size="sm"
                         variant="outline"
                         onClick={(event) => {
-                          event.stopPropagation()
-                          if (!canRevoke) return
-                          onRevoke(m.id)
+                          event.stopPropagation();
+                          if (!canRevoke) return;
+                          onRevoke(m.id);
                         }}
                         disabled={!canRevoke}
                         className="border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
@@ -157,10 +160,10 @@ export function MandateTable({
                   </div>
                 </TableCell>
               </TableRow>
-            )
+            );
           })}
         </TableBody>
       </Table>
     </div>
-  )
+  );
 }
