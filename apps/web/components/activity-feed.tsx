@@ -66,7 +66,7 @@ export function ActivityFeed({
                   e.kind === "tx.executed" && "text-foreground"
                 )}
               >
-                {formatSui(e.amount, { compact: true })}
+                {e.amountAsset ?? formatSui(e.amount, { compact: true })}
               </span>
             )}
             <span className="ml-auto text-xs text-muted-foreground tabular-nums">

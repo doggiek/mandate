@@ -91,7 +91,11 @@ export function MandateTable({
                   <StatusBadge status={m.status} />
                 </TableCell>
                 <TableCell>
-                  <BudgetMeter spent={m.spent} budget={m.budget} />
+                  <BudgetMeter
+                    spent={m.spent}
+                    budget={m.budget}
+                    symbol={m.assetSymbol ?? "SUI"}
+                  />
                 </TableCell>
                 <TableCell className="hidden md:table-cell">
                   <div className="flex flex-wrap gap-1">

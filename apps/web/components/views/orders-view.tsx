@@ -1,27 +1,30 @@
-"use client"
+"use client";
 
-import * as React from "react"
+import * as React from "react";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { CopyableId } from "@/components/copyable-id"
-import { ExplorerLink } from "@/components/explorer-link"
-import { Skeleton } from "@/components/ui/skeleton"
-import { DEEPBOOK_POOL_ID } from "@/lib/chain-config"
-import { formatSui } from "@/lib/format"
-import { useMandateStore } from "@/lib/mandate-store"
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { CopyableId } from "@/components/copyable-id";
+import { ExplorerLink } from "@/components/explorer-link";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  DEEPBOOK_POOL_ID,
+  DEEPBOOK_POOL_ID_SUI_DUSDC,
+} from "@/lib/chain-config";
+import { formatSui } from "@/lib/format";
+import { useMandateStore } from "@/lib/mandate-store";
 
-const DEEPBOOK_PAIR = "DEEP/SUI"
-const DEEPBOOK_SIDE = "Buy"
-const PAGE_SIZE = 20
+const DEEPBOOK_PAIR = "DEEP/SUI";
+const DEEPBOOK_SIDE = "Buy";
+const PAGE_SIZE = 20;
 const ORDER_GRID =
-  "grid-cols-[minmax(0,1.45fr)_minmax(0,1.05fr)_minmax(0,0.85fr)_minmax(0,0.8fr)_minmax(0,1.25fr)_minmax(0,0.75fr)_96px]"
+  "grid-cols-[minmax(0,1.45fr)_minmax(0,1.05fr)_minmax(0,0.85fr)_minmax(0,0.8fr)_minmax(0,1.25fr)_minmax(0,0.75fr)_96px]";
 
 function OrdersSkeleton() {
   return (
@@ -42,99 +45,108 @@ function OrdersSkeleton() {
         </div>
       ))}
     </div>
-  )
+  );
 }
 
 function executionTime(timestamp: number) {
   if (!Number.isFinite(timestamp) || timestamp <= 0) {
-    return "-"
+    return "-";
   }
 
-  const diffMs = Date.now() - timestamp
+  const diffMs = Date.now() - timestamp;
   if (diffMs < 60_000) {
-    return "just now"
+    return "just now";
   }
 
-  const mins = Math.floor(diffMs / 60_000)
+  const mins = Math.floor(diffMs / 60_000);
   if (mins < 60) {
-    return `${mins}m ago`
+    return `${mins}m ago`;
   }
 
-  const hours = Math.floor(diffMs / 3_600_000)
+  const hours = Math.floor(diffMs / 3_600_000);
   if (hours < 24) {
-    return `${hours}h ago`
+    return `${hours}h ago`;
   }
 
-  return `${Math.floor(hours / 24)}d ago`
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 function executionStatusLabel(execution: {
-  status: string
-  fillStatus?: "filled" | "no_fill" | "amount_unavailable"
+  status: string;
+  fillStatus?: "filled" | "no_fill" | "amount_unavailable";
 }) {
   if (execution.status === "failed") {
-    return "Failed"
+    return "Failed";
   }
   if (execution.fillStatus === "filled") {
-    return "Filled"
+    return "Filled";
   }
   if (execution.fillStatus === "no_fill") {
-    return "No fill"
+    return "No fill";
   }
-  return "Amount unavailable"
+  return "Amount unavailable";
 }
 
 function executionStatusClass(execution: {
-  status: string
-  fillStatus?: "filled" | "no_fill" | "amount_unavailable"
+  status: string;
+  fillStatus?: "filled" | "no_fill" | "amount_unavailable";
 }) {
   if (execution.status === "failed") {
-    return "border-destructive/30 bg-destructive/10 font-medium text-destructive"
+    return "border-destructive/30 bg-destructive/10 font-medium text-destructive";
   }
   if (execution.fillStatus === "filled") {
-    return "border-emerald-500/25 bg-emerald-500/10 font-medium text-emerald-400"
+    return "border-emerald-500/25 bg-emerald-500/10 font-medium text-emerald-400";
   }
   if (execution.fillStatus === "no_fill") {
-    return "border-amber-500/25 bg-amber-500/10 font-medium text-amber-400"
+    return "border-amber-500/25 bg-amber-500/10 font-medium text-amber-400";
   }
-  return "border-border bg-background/60 font-medium text-muted-foreground"
+  return "border-border bg-background/60 font-medium text-muted-foreground";
 }
 
 function outputSummary(execution: {
-  outputAmount?: string
-  outputAsset?: string
-  outputCoinObjectIds?: string[]
-  residualSuiAmount?: number
-  fillStatus?: "filled" | "no_fill" | "amount_unavailable"
+  outputAmount?: string;
+  outputAsset?: string;
+  outputCoinObjectIds?: string[];
+  residualSuiAmount?: number;
+  residualAmount?: number;
+  residualAsset?: string;
+  fillStatus?: "filled" | "no_fill" | "amount_unavailable";
 }) {
-  const parts: string[] = []
+  const parts: string[] = [];
   if (execution.fillStatus === "no_fill") {
-    parts.push("No DEEP filled")
+    parts.push(`No ${execution.outputAsset ?? "output"} filled`);
   } else if (execution.outputAmount) {
-    parts.push(execution.outputAmount)
+    parts.push(execution.outputAmount);
   } else if (execution.outputCoinObjectIds?.length) {
-    parts.push("Amount unavailable")
+    parts.push("Amount unavailable");
   } else {
-    parts.push("Amount unavailable")
+    parts.push("Amount unavailable");
   }
 
   if (typeof execution.residualSuiAmount === "number") {
-    parts.push(`${formatSui(execution.residualSuiAmount)} returned`)
+    parts.push(`${formatSui(execution.residualSuiAmount)} returned`);
+  }
+  if (typeof execution.residualAmount === "number" && execution.residualAsset) {
+    parts.push(
+      `${execution.residualAmount} ${execution.residualAsset} returned`,
+    );
   }
 
-  return parts
+  return parts;
 }
 
 export function OrdersView() {
-  const { orders, loading } = useMandateStore()
-  const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE)
-  const [expandedOrderId, setExpandedOrderId] = React.useState<string | null>(null)
-  const sortedOrders = [...orders].sort((a, b) => b.timestamp - a.timestamp)
-  const visibleOrders = sortedOrders.slice(0, visibleCount)
+  const { orders, loading } = useMandateStore();
+  const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE);
+  const [expandedOrderId, setExpandedOrderId] = React.useState<string | null>(
+    null,
+  );
+  const sortedOrders = [...orders].sort((a, b) => b.timestamp - a.timestamp);
+  const visibleOrders = sortedOrders.slice(0, visibleCount);
 
   React.useEffect(() => {
-    setVisibleCount(PAGE_SIZE)
-  }, [orders.length])
+    setVisibleCount(PAGE_SIZE);
+  }, [orders.length]);
 
   return (
     <Card>
@@ -149,7 +161,9 @@ export function OrdersView() {
           <OrdersSkeleton />
         ) : sortedOrders.length > 0 ? (
           <div className="divide-y divide-border">
-            <div className={`grid ${ORDER_GRID} gap-4 px-5 py-3 text-xs font-medium text-muted-foreground`}>
+            <div
+              className={`grid ${ORDER_GRID} gap-4 px-5 py-3 text-xs font-medium text-muted-foreground`}
+            >
               <span>Mandate</span>
               <span>Digest</span>
               <span>Market</span>
@@ -159,154 +173,168 @@ export function OrdersView() {
               <span className="text-right">Time</span>
             </div>
             {visibleOrders.map((execution) => {
-              const outputParts = outputSummary(execution)
-              const outputObjectCount = execution.outputCoinObjectIds?.length ?? 0
-              const expanded = expandedOrderId === execution.id
+              const outputParts = outputSummary(execution);
+              const outputObjectCount =
+                execution.outputCoinObjectIds?.length ?? 0;
+              const expanded = expandedOrderId === execution.id;
 
               return (
-              <div
-                key={execution.id}
-                className="px-5 py-4 transition-colors hover:bg-muted/35"
-              >
-                <div className={`grid ${ORDER_GRID} items-start gap-4`}>
-                  <div className="min-w-0">
-                    <div className="flex min-w-0 flex-col gap-1">
-                      <span className="font-medium">
-                        {execution.mandateLabel}
+                <div
+                  key={execution.id}
+                  className="px-5 py-4 transition-colors hover:bg-muted/35"
+                >
+                  <div className={`grid ${ORDER_GRID} items-start gap-4`}>
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 flex-col gap-1">
+                        <span className="font-medium">
+                          {execution.mandateLabel}
+                        </span>
+                        <span className="inline-flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                          <CopyableId
+                            value={execution.mandateId}
+                            label="mandate id"
+                          />
+                          <ExplorerLink
+                            objectId={execution.mandateId}
+                            label="View mandate on Suivision"
+                          />
+                        </span>
+                      </div>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="inline-flex min-w-0 items-center gap-1">
+                        <CopyableId value={execution.digest} label="digest" />
+                        <ExplorerLink digest={execution.digest} />
                       </span>
-                      <span className="inline-flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="font-medium">
+                          {execution.pair ?? DEEPBOOK_PAIR}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {execution.side ?? DEEPBOOK_SIDE}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="font-mono text-sm">
+                          {typeof execution.inputAmount === "number"
+                            ? `${execution.inputAmount} ${execution.inputAsset ?? "SUI"}`
+                            : typeof execution.amountSui === "number"
+                              ? formatSui(execution.amountSui)
+                              : "0.001 SUI"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 flex-col gap-0.5">
+                        <span className="truncate text-sm font-medium">
+                          {outputParts[0]}
+                        </span>
+                        <span className="truncate text-xs text-muted-foreground">
+                          {outputParts.slice(1).join(" · ") ||
+                            (outputObjectCount
+                              ? `${outputObjectCount} object${outputObjectCount === 1 ? "" : "s"}`
+                              : "Output details unavailable")}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="min-w-0">
+                      <Badge
+                        variant="outline"
+                        className={executionStatusClass(execution)}
+                      >
+                        {executionStatusLabel(execution)}
+                      </Badge>
+                      {execution.status !== "failed" && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {execution.fillStatus === "filled"
+                            ? "Swap filled"
+                            : execution.fillStatus === "no_fill"
+                              ? `No ${execution.outputAsset ?? "output"} filled`
+                              : "Amount unavailable"}
+                        </p>
+                      )}
+                    </div>
+                    <div className="min-w-[110px] text-right text-sm text-muted-foreground tabular-nums">
+                      {executionTime(execution.timestamp)}
+                    </div>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    {(() => {
+                      const poolId =
+                        execution.pair === "SUI_DUSDC"
+                          ? DEEPBOOK_POOL_ID_SUI_DUSDC
+                          : DEEPBOOK_POOL_ID;
+                      return poolId ? (
+                        <span className="inline-flex min-w-0 items-center gap-1">
+                          Pool:
+                          <CopyableId
+                            value={poolId}
+                            label="DeepBook pool object id"
+                          />
+                          <ExplorerLink
+                            objectId={poolId}
+                            label="View DeepBook pool on Suivision"
+                          />
+                        </span>
+                      ) : null;
+                    })()}
+                    {execution.outputOwner ? (
+                      <span className="inline-flex min-w-0 items-center gap-1">
+                        Owner:
                         <CopyableId
-                          value={execution.mandateId}
-                          label="mandate id"
-                        />
-                        <ExplorerLink
-                          objectId={execution.mandateId}
-                          label="View mandate on Suivision"
+                          value={execution.outputOwner}
+                          label="output owner"
                         />
                       </span>
-                    </div>
-                  </div>
-                  <div className="min-w-0">
-                    <span className="inline-flex min-w-0 items-center gap-1">
-                      <CopyableId value={execution.digest} label="digest" />
-                      <ExplorerLink digest={execution.digest} />
+                    ) : null}
+                    <span>
+                      Gas Fee:{" "}
+                      <span className="font-mono">
+                        {typeof execution.gasFeeSui === "number"
+                          ? formatSui(execution.gasFeeSui)
+                          : "-"}
+                      </span>
                     </span>
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="font-medium">{DEEPBOOK_PAIR}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {execution.side ?? DEEPBOOK_SIDE}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="font-mono text-sm">
-                        {typeof execution.amountSui === "number"
-                          ? formatSui(execution.amountSui)
-                          : "0.001 SUI"}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex min-w-0 flex-col gap-0.5">
-                      <span className="truncate text-sm font-medium">
-                        {outputParts[0]}
-                      </span>
-                      <span className="truncate text-xs text-muted-foreground">
-                        {outputParts.slice(1).join(" · ") ||
-                          (outputObjectCount
-                            ? `${outputObjectCount} object${outputObjectCount === 1 ? "" : "s"}`
-                            : "Output details unavailable")}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="min-w-0">
-                    <Badge
-                      variant="outline"
-                      className={executionStatusClass(execution)}
-                    >
-                      {executionStatusLabel(execution)}
-                    </Badge>
-                    {execution.status !== "failed" && (
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {execution.fillStatus === "filled"
-                          ? "Swap filled"
-                          : execution.fillStatus === "no_fill"
-                            ? "No DEEP filled"
-                            : "Amount unavailable"}
-                      </p>
+                    <span>Output objects: {outputObjectCount || "-"}</span>
+                    {outputObjectCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedOrderId(expanded ? null : execution.id)
+                        }
+                        className="text-cyan-300 hover:text-cyan-200"
+                      >
+                        {expanded ? "Hide details" : "Details"}
+                      </button>
                     )}
                   </div>
-                  <div className="min-w-[110px] text-right text-sm text-muted-foreground tabular-nums">
-                    {executionTime(execution.timestamp)}
-                  </div>
-                </div>
-                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                  <span className="inline-flex min-w-0 items-center gap-1">
-                    Pool:
-                    <CopyableId
-                      value={DEEPBOOK_POOL_ID}
-                      label="DeepBook pool object id"
-                    />
-                    <ExplorerLink
-                      objectId={DEEPBOOK_POOL_ID}
-                      label="View DeepBook pool on Suivision"
-                    />
-                  </span>
-                  {execution.outputOwner ? (
-                    <span className="inline-flex min-w-0 items-center gap-1">
-                      Owner:
-                      <CopyableId
-                        value={execution.outputOwner}
-                        label="output owner"
-                      />
-                    </span>
+                  {expanded && execution.outputCoinObjectIds?.length ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-background/45 px-3 py-2 text-xs text-muted-foreground">
+                      <span>Output object ids:</span>
+                      {execution.outputCoinObjectIds.map((objectId) => (
+                        <span
+                          key={objectId}
+                          className="inline-flex min-w-0 items-center gap-1"
+                        >
+                          <CopyableId
+                            value={objectId}
+                            label="output coin object id"
+                          />
+                          <ExplorerLink
+                            objectId={objectId}
+                            label="View output coin on Suivision"
+                          />
+                        </span>
+                      ))}
+                    </div>
                   ) : null}
-                  <span>
-                    Gas Fee:{" "}
-                    <span className="font-mono">
-                      {typeof execution.gasFeeSui === "number"
-                        ? formatSui(execution.gasFeeSui)
-                        : "-"}
-                    </span>
-                  </span>
-                  <span>Output objects: {outputObjectCount || "-"}</span>
-                  {outputObjectCount > 0 && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setExpandedOrderId(expanded ? null : execution.id)
-                      }
-                      className="text-cyan-300 hover:text-cyan-200"
-                    >
-                      {expanded ? "Hide details" : "Details"}
-                    </button>
-                  )}
                 </div>
-                {expanded && execution.outputCoinObjectIds?.length ? (
-                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-background/45 px-3 py-2 text-xs text-muted-foreground">
-                    <span>Output object ids:</span>
-                    {execution.outputCoinObjectIds.map((objectId) => (
-                      <span
-                        key={objectId}
-                        className="inline-flex min-w-0 items-center gap-1"
-                      >
-                        <CopyableId
-                          value={objectId}
-                          label="output coin object id"
-                        />
-                        <ExplorerLink
-                          objectId={objectId}
-                          label="View output coin on Suivision"
-                        />
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            )})}
+              );
+            })}
             {visibleCount < sortedOrders.length && (
               <div className="border-t border-border py-4 text-center">
                 <Button
@@ -331,5 +359,5 @@ export function OrdersView() {
         )}
       </CardContent>
     </Card>
-  )
+  );
 }

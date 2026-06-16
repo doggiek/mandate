@@ -17,6 +17,9 @@ export type Mandate = {
   objectType?: string
   digest?: string
   status: MandateStatus
+  spendAsset?: string
+  assetSymbol?: string
+  assetDecimals?: number
   /** total budget ceiling in SUI */
   budget: number
   /** spent so far in SUI */
@@ -61,6 +64,8 @@ export type ActivityEvent = {
   title?: string
   status?: string
   amountSui?: number
+  amountAsset?: string
+  assetSymbol?: string
   timeDisplay?: string
   gasFeeSui?: number
   outputCoinObjectIds?: string[]
@@ -68,6 +73,8 @@ export type ActivityEvent = {
   outputAsset?: string
   outputAmount?: string
   residualSuiAmount?: number
+  residualAmount?: number
+  residualAsset?: string
   outputCoinType?: string
   fillStatus?: FillStatus
 }
@@ -86,6 +93,8 @@ export type DeepBookOrder = {
   pair: string
   side: ExecutionSide
   amountSui?: number
+  inputAmount?: number
+  inputAsset?: string
   status: ExecutionStatus
   suiBalanceChange?: number
   gasFeeSui?: number
@@ -95,6 +104,8 @@ export type DeepBookOrder = {
   outputCoinType?: string
   outputAmount?: string
   residualSuiAmount?: number
+  residualAmount?: number
+  residualAsset?: string
   fillStatus?: FillStatus
 }
 

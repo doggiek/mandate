@@ -6,11 +6,13 @@ export function BudgetMeter({
   budget,
   className,
   showLabel = true,
+  symbol = "SUI",
 }: {
   spent: number
   budget: number
   className?: string
   showLabel?: boolean
+  symbol?: string
 }) {
   const pct = budget > 0 ? Math.min(100, (spent / budget) * 100) : 0
   const tone =
@@ -25,10 +27,14 @@ export function BudgetMeter({
       {showLabel && (
         <div className="flex items-center justify-between text-xs">
           <span className="font-medium tabular-nums">
-            {formatSui(spent, { compact: true })}
+            {symbol === "SUI"
+              ? formatSui(spent, { compact: true })
+              : `${spent} ${symbol}`}
           </span>
           <span className="text-muted-foreground tabular-nums">
-            {formatSui(budget, { compact: true })}
+            {symbol === "SUI"
+              ? formatSui(budget, { compact: true })
+              : `${budget} ${symbol}`}
           </span>
         </div>
       )}

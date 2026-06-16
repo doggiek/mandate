@@ -133,7 +133,11 @@ function OverviewMandatesTable({
                 <StatusBadge status={mandate.status} />
               </TableCell>
               <TableCell>
-                <BudgetMeter spent={mandate.spent} budget={mandate.budget} />
+                <BudgetMeter
+                  spent={mandate.spent}
+                  budget={mandate.budget}
+                  symbol={mandate.assetSymbol ?? "SUI"}
+                />
               </TableCell>
               <TableCell className="hidden md:table-cell">
                 <div className="flex flex-wrap gap-1">

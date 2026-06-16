@@ -1,17 +1,17 @@
-import 'dotenv/config';
+import "dotenv/config";
 
-import { decodeSuiPrivateKey } from '@mysten/sui/cryptography';
-import { SuiGrpcClient } from '@mysten/sui/grpc';
-import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
-import { Transaction } from '@mysten/sui/transactions';
-import { isValidSuiAddress } from '@mysten/sui/utils';
+import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
+import { SuiGrpcClient } from "@mysten/sui/grpc";
+import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+import { Transaction } from "@mysten/sui/transactions";
+import { isValidSuiAddress } from "@mysten/sui/utils";
 
-const SUI_TYPE = '0x2::sui::SUI';
+const SUI_TYPE = "0x2::sui::SUI";
 const NORMALIZED_SUI_TYPE =
-  '0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI';
+  "0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI";
 const MIST_PER_SUI = 1_000_000_000n;
 const DEFAULT_BACKEND_AGENT_ADDRESS =
-  '0x91dc52b575b3cd5703be07ee65e12b5af3a25d927b16fa8f94811b7b773ad8b2';
+  "0x91dc52b575b3cd5703be07ee65e12b5af3a25d927b16fa8f94811b7b773ad8b2";
 
 type TransactionLike = {
   digest?: string;
@@ -55,64 +55,105 @@ function requireEnvWithFallback(name: string, fallbackName: string): string {
 function requireSuiAddressEnv(name: string): string {
   const value = requireEnv(name);
   if (!isValidSuiAddress(value)) {
-    throw new Error(`${name} must be a valid Sui object/address id, got: ${value}`);
+    throw new Error(
+      `${name} must be a valid Sui object/address id, got: ${value}`,
+    );
   }
   return value;
 }
 
+function requireEnvIf(condition: boolean, name: string): string | undefined {
+  if (!condition) {
+    return undefined;
+  }
+  return requireEnv(name);
+}
+
 function normalizeSuiAddress(value: string): string {
   const raw = value.trim().toLowerCase();
-  const withoutPrefix = raw.startsWith('0x') ? raw.slice(2) : raw;
-  const normalized = withoutPrefix.replace(/^0+/, '') || '0';
+  const withoutPrefix = raw.startsWith("0x") ? raw.slice(2) : raw;
+  const normalized = withoutPrefix.replace(/^0+/, "") || "0";
   return `0x${normalized}`;
 }
 
 function parseSuiToMist(value: string): bigint {
-  const [wholePart, fractionalPart = ''] = value.split('.');
+  return parseDecimalToUnits(value, 9, "SUI amount");
+}
+
+function parseDecimalToUnits(
+  value: string,
+  decimals: number,
+  label: string,
+): bigint {
+  const [wholePart, fractionalPart = ""] = value.split(".");
   if (!wholePart || !/^\d+$/.test(wholePart) || !/^\d*$/.test(fractionalPart)) {
-    throw new Error(`Invalid SUI amount: ${value}`);
+    throw new Error(`Invalid ${label}: ${value}`);
   }
 
-  const fractional = fractionalPart.padEnd(9, '0').slice(0, 9);
-  return BigInt(wholePart) * MIST_PER_SUI + BigInt(fractional || '0');
+  const fractional = fractionalPart.padEnd(decimals, "0").slice(0, decimals);
+  return (
+    BigInt(wholePart) * BigInt(10) ** BigInt(decimals) +
+    BigInt(fractional || "0")
+  );
 }
 
 function formatMistDelta(amount: string | undefined): string {
   if (!amount) {
-    return '0 SUI';
+    return "0 SUI";
   }
 
   const value = BigInt(amount);
-  const sign = value < 0n ? '-' : '';
+  const sign = value < 0n ? "-" : "";
   const absolute = value < 0n ? -value : value;
   const whole = absolute / MIST_PER_SUI;
-  const fractional = (absolute % MIST_PER_SUI).toString().padStart(9, '0').replace(/0+$/, '');
+  const fractional = (absolute % MIST_PER_SUI)
+    .toString()
+    .padStart(9, "0")
+    .replace(/0+$/, "");
 
-  return `${sign}${whole.toString()}${fractional ? `.${fractional}` : ''} SUI`;
+  return `${sign}${whole.toString()}${fractional ? `.${fractional}` : ""} SUI`;
 }
 
-function netSuiBalanceChange(balanceChanges: TransactionLike['balanceChanges']): string {
+function netSuiBalanceChange(
+  balanceChanges: TransactionLike["balanceChanges"],
+): string {
   const total = (balanceChanges ?? [])
-    .filter((change) => change.coinType === SUI_TYPE || change.coinType === NORMALIZED_SUI_TYPE)
-    .reduce((sum, change) => sum + BigInt(change.amount ?? '0'), 0n);
+    .filter(
+      (change) =>
+        change.coinType === SUI_TYPE || change.coinType === NORMALIZED_SUI_TYPE,
+    )
+    .reduce((sum, change) => sum + BigInt(change.amount ?? "0"), 0n);
 
   return formatMistDelta(total.toString());
 }
 
-function gasFee(effects: TransactionLike['effects']): string {
+function gasFee(effects: TransactionLike["effects"]): string {
   const gasUsed = effects?.gasUsed ?? effects?.gas_used;
   if (!gasUsed) {
-    return '-';
+    return "-";
   }
 
-  const computationCost = BigInt(gasUsed.computationCost ?? gasUsed.computation_cost ?? '0');
-  const storageCost = BigInt(gasUsed.storageCost ?? gasUsed.storage_cost ?? '0');
-  const storageRebate = BigInt(gasUsed.storageRebate ?? gasUsed.storage_rebate ?? '0');
-  return formatMistDelta((computationCost + storageCost - storageRebate).toString());
+  const computationCost = BigInt(
+    gasUsed.computationCost ?? gasUsed.computation_cost ?? "0",
+  );
+  const storageCost = BigInt(
+    gasUsed.storageCost ?? gasUsed.storage_cost ?? "0",
+  );
+  const storageRebate = BigInt(
+    gasUsed.storageRebate ?? gasUsed.storage_rebate ?? "0",
+  );
+  return formatMistDelta(
+    (computationCost + storageCost - storageRebate).toString(),
+  );
 }
 
-function hasBlockedEvent(events: TransactionLike['events'], packageId: string): boolean {
-  return (events ?? []).some((event) => event.eventType === `${packageId}::mandate::BlockedEvent`);
+function hasBlockedEvent(
+  events: TransactionLike["events"],
+  packageId: string,
+): boolean {
+  return (events ?? []).some(
+    (event) => event.eventType === `${packageId}::mandate::BlockedEvent`,
+  );
 }
 
 function reasonBytes(reason: string): number[] {
@@ -136,54 +177,67 @@ function printDemoSummary({
   balanceChange: string;
   gasFeeSui: string;
 }) {
-  console.log('========================================');
-  console.log('Mandate DeepBook Demo');
-  console.log('========================================');
-  console.log('');
-  console.log('Digest:');
+  console.log("========================================");
+  console.log("Mandate DeepBook Demo");
+  console.log("========================================");
+  console.log("");
+  console.log("Digest:");
   console.log(digest);
-  console.log('');
-  console.log('Status:');
-  console.log('BLOCKED');
-  console.log('');
-  console.log('Mandate:');
+  console.log("");
+  console.log("Status:");
+  console.log("BLOCKED");
+  console.log("");
+  console.log("Mandate:");
   console.log(mandateId);
-  console.log('');
-  console.log('Pool:');
-  console.log('DEEP_SUI');
-  console.log('');
-  console.log('Amount:');
+  console.log("");
+  console.log("Pool:");
+  console.log("DEEP_SUI");
+  console.log("");
+  console.log("Amount:");
   console.log(`${amountSui} SUI`);
-  console.log('');
-  console.log('Activity Event:');
-  console.log(activityEventFound ? 'FOUND' : 'NOT FOUND');
-  console.log('');
-  console.log('DeepBook Pool Mutation:');
-  console.log('NOT FOUND');
-  console.log('');
-  console.log('Balance Change:');
+  console.log("");
+  console.log("Activity Event:");
+  console.log(activityEventFound ? "FOUND" : "NOT FOUND");
+  console.log("");
+  console.log("DeepBook Pool Mutation:");
+  console.log("NOT FOUND");
+  console.log("");
+  console.log("Balance Change:");
   console.log(balanceChange);
-  console.log('');
-  console.log('Gas Fee:');
+  console.log("");
+  console.log("Gas Fee:");
   console.log(gasFeeSui);
-  console.log('');
-  console.log('Blocked Reason:');
+  console.log("");
+  console.log("Blocked Reason:");
   console.log(reason);
-  console.log('');
-  console.log('========================================');
+  console.log("");
+  console.log("========================================");
 }
 
 async function main() {
-  const agentPrivateKey = requireEnvWithFallback('BACKEND_AGENT_PRIVATE_KEY', 'AGENT_PRIVATE_KEY');
-  const packageId = requireSuiAddressEnv('PACKAGE_ID');
-  const mandateId = requireSuiAddressEnv('MANDATE_ID');
-  const amountSui = process.env.AMOUNT_SUI ?? '0.001';
-  const blockReason = process.env.BLOCK_REASON ?? 'blocked_by_policy';
-  const amountMist = parseSuiToMist(amountSui);
+  const agentPrivateKey = requireEnvWithFallback(
+    "BACKEND_AGENT_PRIVATE_KEY",
+    "AGENT_PRIVATE_KEY",
+  );
+  const packageId = requireSuiAddressEnv("PACKAGE_ID");
+  const mandateId = requireSuiAddressEnv("MANDATE_ID");
+  const amountSui = process.env.AMOUNT_SUI ?? "0.001";
+  const blockReason = process.env.BLOCK_REASON ?? "blocked_by_policy";
+  const routeId = process.env.ROUTE_ID ?? "deep_momentum_buy";
+  const isAssetRoute = routeId === "sui_momentum_buy";
+  const DUSDCCoinType = isAssetRoute
+    ? (process.env.NEXT_PUBLIC_DBUSDC_COIN_TYPE ??
+      requireEnvIf(true, "NEXT_PUBLIC_DUSDC_COIN_TYPE"))
+    : undefined;
+  const amountUnits = isAssetRoute
+    ? parseDecimalToUnits(amountSui, 6, "DUSDC amount")
+    : parseSuiToMist(amountSui);
 
   const { secretKey, scheme } = decodeSuiPrivateKey(agentPrivateKey);
-  if (scheme !== 'ED25519') {
-    throw new Error(`BACKEND_AGENT_PRIVATE_KEY must be an ED25519 Sui private key, got ${scheme}`);
+  if (scheme !== "ED25519") {
+    throw new Error(
+      `BACKEND_AGENT_PRIVATE_KEY must be an ED25519 Sui private key, got ${scheme}`,
+    );
   }
 
   const keypair = Ed25519Keypair.fromSecretKey(secretKey);
@@ -192,27 +246,43 @@ async function main() {
     process.env.NEXT_PUBLIC_BACKEND_AGENT_ADDRESS ??
     process.env.NEXT_PUBLIC_VERIFIED_AGENT_ADDRESS ??
     DEFAULT_BACKEND_AGENT_ADDRESS;
-  if (normalizeSuiAddress(expectedAgentAddress) !== normalizeSuiAddress(agentAddress)) {
+  if (
+    normalizeSuiAddress(expectedAgentAddress) !==
+    normalizeSuiAddress(agentAddress)
+  ) {
     throw new Error(
-      'NEXT_PUBLIC_BACKEND_AGENT_ADDRESS does not match BACKEND_AGENT_PRIVATE_KEY. Update .env.local so the Mandate backend agent address and backend agent signer are the same wallet.',
+      "NEXT_PUBLIC_BACKEND_AGENT_ADDRESS does not match BACKEND_AGENT_PRIVATE_KEY. Update .env.local so the Mandate backend agent address and backend agent signer are the same wallet.",
     );
   }
   const client = new SuiGrpcClient({
-    network: 'testnet',
-    baseUrl: 'https://fullnode.testnet.sui.io:443',
+    network: "testnet",
+    baseUrl: "https://fullnode.testnet.sui.io:443",
   });
 
   const tx = new Transaction();
   tx.setSender(agentAddress);
-  tx.moveCall({
-    target: `${packageId}::mandate::record_blocked_action`,
-    arguments: [
-      tx.object(mandateId),
-      tx.pure.u64(amountMist),
-      tx.pure.vector('u8', reasonBytes(blockReason)),
-      tx.object.clock(),
-    ],
-  });
+  if (isAssetRoute) {
+    tx.moveCall({
+      target: `${packageId}::mandate::record_blocked_action_for_asset`,
+      typeArguments: [DUSDCCoinType!],
+      arguments: [
+        tx.object(mandateId),
+        tx.pure.u64(amountUnits),
+        tx.pure.vector("u8", reasonBytes(blockReason)),
+        tx.object.clock(),
+      ],
+    });
+  } else {
+    tx.moveCall({
+      target: `${packageId}::mandate::record_blocked_action`,
+      arguments: [
+        tx.object(mandateId),
+        tx.pure.u64(amountUnits),
+        tx.pure.vector("u8", reasonBytes(blockReason)),
+        tx.object.clock(),
+      ],
+    });
+  }
 
   const result = await client.core.signAndExecuteTransaction({
     signer: keypair,
@@ -225,10 +295,14 @@ async function main() {
     },
   });
 
-  const submitted = (result.Transaction ?? result.FailedTransaction) as TransactionLike | undefined;
+  const submitted = (result.Transaction ?? result.FailedTransaction) as
+    | TransactionLike
+    | undefined;
   const digest = submitted?.digest;
   if (!digest) {
-    throw new Error('signAndExecuteTransaction did not return a transaction digest');
+    throw new Error(
+      "signAndExecuteTransaction did not return a transaction digest",
+    );
   }
 
   const confirmedResult = await client.core.waitForTransaction({
@@ -241,11 +315,12 @@ async function main() {
     },
   });
 
-  const confirmed = (confirmedResult.Transaction ?? confirmedResult.FailedTransaction) as
-    | TransactionLike
-    | undefined;
+  const confirmed = (confirmedResult.Transaction ??
+    confirmedResult.FailedTransaction) as TransactionLike | undefined;
   if (!confirmed?.digest) {
-    throw new Error(`waitForTransaction did not return details for digest ${digest}`);
+    throw new Error(
+      `waitForTransaction did not return details for digest ${digest}`,
+    );
   }
 
   if (confirmed.status?.success !== true) {
@@ -268,7 +343,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  if (process.env.DEBUG_STACK === '1') {
+  if (process.env.DEBUG_STACK === "1") {
     console.error(error);
     process.exit(1);
   }

@@ -1,45 +1,50 @@
-export type TradingRouteId = "deep_momentum_buy" | "sui_momentum_buy"
-export type SignalSourceId = "deepbook_quote" | "sui_price"
+export type TradingRouteId = "deep_momentum_buy" | "sui_momentum_buy";
+export type SignalSourceId = "deepbook_quote" | "sui_price";
 
 export type TradingRoute = {
-  id: TradingRouteId
-  label: string
-  description: string
+  id: TradingRouteId;
+  label: string;
+  description: string;
   signal: {
-    strategyId: string
-    source: SignalSourceId
-    market: string
-    signalAsset: string
-    quoteAsset: string
-    thresholdPct: number
-  }
+    strategyId: string;
+    source: SignalSourceId;
+    market: string;
+    signalAsset: string;
+    quoteAsset: string;
+    thresholdPct: number;
+  };
   action: {
-    type: "buy"
-    spendAsset: string
-    buyAsset: string
-    poolKey: string
-    poolId: string
-    inputDecimals: number
-    outputDecimals: number
-    executionAmount: number
-    executable: boolean
-    unavailableReason?: string
-  }
-}
+    type: "buy";
+    spendAsset: string;
+    buyAsset: string;
+    poolKey: string;
+    poolId: string;
+    inputDecimals: number;
+    outputDecimals: number;
+    executionAmount: number;
+    executable: boolean;
+    unavailableReason?: string;
+  };
+};
 
 const deepSuiPoolKey =
   process.env.NEXT_PUBLIC_DEEPBOOK_POOL_KEY_DEEP_SUI ??
   process.env.NEXT_PUBLIC_DEEPBOOK_POOL_KEY ??
-  "DEEP_SUI"
+  "DEEP_SUI";
 const deepSuiPoolId =
   process.env.NEXT_PUBLIC_DEEPBOOK_POOL_ID_DEEP_SUI ??
   process.env.NEXT_PUBLIC_DEEPBOOK_POOL_ID ??
-  ""
-const suiDbusdcPoolKey =
-  process.env.NEXT_PUBLIC_DEEPBOOK_POOL_KEY_SUI_DBUSDC ?? "SUI_DBUSDC"
-const suiDbusdcPoolId =
-  process.env.NEXT_PUBLIC_DEEPBOOK_POOL_ID_SUI_DBUSDC ?? ""
-const dbusdcCoinType = process.env.NEXT_PUBLIC_DBUSDC_COIN_TYPE ?? ""
+  "";
+const suiDUSDCPoolKey =
+  process.env.NEXT_PUBLIC_DEEPBOOK_POOL_KEY_SUI_DBUSDC ??
+  process.env.NEXT_PUBLIC_DEEPBOOK_POOL_KEY_SUI_DUSDC ??
+  "SUI_DUSDC";
+const suiDUSDCPoolId =
+  process.env.NEXT_PUBLIC_DEEPBOOK_POOL_ID_SUI_DBUSDC ??
+  process.env.NEXT_PUBLIC_DEEPBOOK_POOL_ID_SUI_DUSDC ??
+  "";
+const TEST_USDC_ROUTE_UNAVAILABLE_REASON =
+  "USDC route unavailable on current DeepBook testnet.";
 
 export const TRADING_ROUTES: TradingRoute[] = [
   {
@@ -72,7 +77,7 @@ export const TRADING_ROUTES: TradingRoute[] = [
   {
     id: "sui_momentum_buy",
     label: "SUI Momentum",
-    description: "Signal: SUI/USD price. Action: Buy SUI with DeepBook test USDC.",
+    description: "Signal: SUI/USD price. Action: Buy SUI with test USDC.",
     signal: {
       strategyId: "sui_price_momentum",
       source: "sui_price",
@@ -83,30 +88,31 @@ export const TRADING_ROUTES: TradingRoute[] = [
     },
     action: {
       type: "buy",
-      spendAsset: "DBUSDC",
+      spendAsset: "DUSDC",
       buyAsset: "SUI",
-      poolKey: suiDbusdcPoolKey,
-      poolId: suiDbusdcPoolId,
+      poolKey: suiDUSDCPoolKey,
+      poolId: suiDUSDCPoolId,
       inputDecimals: 6,
       outputDecimals: 9,
       executionAmount: 1,
       executable: false,
-      unavailableReason:
-        suiDbusdcPoolId && dbusdcCoinType
-          ? "DeepBook test USDC generic vault execution script pending."
-          : "SUI_DBUSDC route not configured.",
+      unavailableReason: TEST_USDC_ROUTE_UNAVAILABLE_REASON,
     },
   },
-]
+];
 
 export function tradingRouteById(id: string | null | undefined) {
-  return TRADING_ROUTES.find((route) => route.id === id)
+  return TRADING_ROUTES.find((route) => route.id === id);
 }
 
-export function tradingRouteByStrategyId(strategyId: string | null | undefined) {
-  return TRADING_ROUTES.find((route) => route.signal.strategyId === strategyId)
+export function tradingRouteByStrategyId(
+  strategyId: string | null | undefined,
+) {
+  return TRADING_ROUTES.find((route) => route.signal.strategyId === strategyId);
 }
 
 export function defaultTradingRoute() {
-  return TRADING_ROUTES.find((route) => route.action.executable) ?? TRADING_ROUTES[0]
+  return (
+    TRADING_ROUTES.find((route) => route.action.executable) ?? TRADING_ROUTES[0]
+  );
 }

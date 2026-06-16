@@ -1,50 +1,50 @@
-import { execFile } from "node:child_process"
-import fs from "node:fs"
-import path from "node:path"
-import { promisify } from "node:util"
-import { decodeSuiPrivateKey } from "@mysten/sui/cryptography"
-import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519"
+import { execFile } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { promisify } from "node:util";
+import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
+import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import {
   LEGACY_POLICY_PACKAGE_IDS,
   BACKEND_AGENT_ADDRESS,
-} from "@/lib/chain-config"
-import { defaultTradingRoute, tradingRouteById } from "@/lib/trading-routes"
+} from "@/lib/chain-config";
+import { defaultTradingRoute, tradingRouteById } from "@/lib/trading-routes";
 
-const execFileAsync = promisify(execFile)
+const execFileAsync = promisify(execFile);
 
-export const runtime = "nodejs"
-export const dynamic = "force-dynamic"
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-type AgentRunStatus = "SUCCESS" | "BLOCKED" | "FAILED"
+type AgentRunStatus = "SUCCESS" | "BLOCKED" | "FAILED";
 
 type AgentRunResult = {
-  digest: string
-  status: AgentRunStatus
-  activityEventFound: boolean
-  deepBookPoolMutationFound: boolean
-  balanceChangeSui: string
-  gasFeeSui: string
-  outputAsset?: string
-  outputCoinType?: string
-  outputAmount?: string
-  residualSui?: string
-  outputCoinObjectIds?: string[]
-  outputOwner?: string
-  fillStatus?: "filled" | "no_fill" | "amount_unavailable"
-  blockedReason?: string
-  error?: string
-}
+  digest: string;
+  status: AgentRunStatus;
+  activityEventFound: boolean;
+  deepBookPoolMutationFound: boolean;
+  balanceChangeSui: string;
+  gasFeeSui: string;
+  outputAsset?: string;
+  outputCoinType?: string;
+  outputAmount?: string;
+  residualSui?: string;
+  outputCoinObjectIds?: string[];
+  outputOwner?: string;
+  fillStatus?: "filled" | "no_fill" | "amount_unavailable";
+  blockedReason?: string;
+  error?: string;
+};
 
 type AgentRunRequest = {
-  mandateId?: unknown
-  ownerAddress?: unknown
-  strategy?: unknown
-  amountSui?: unknown
-  routeId?: unknown
-  spendAsset?: unknown
-  buyAsset?: unknown
-  mandateMetadata?: unknown
-}
+  mandateId?: unknown;
+  ownerAddress?: unknown;
+  strategy?: unknown;
+  amountSui?: unknown;
+  routeId?: unknown;
+  spendAsset?: unknown;
+  buyAsset?: unknown;
+  mandateMetadata?: unknown;
+};
 
 const EMPTY_RESULT: AgentRunResult = {
   digest: "",
@@ -53,30 +53,33 @@ const EMPTY_RESULT: AgentRunResult = {
   deepBookPoolMutationFound: false,
   balanceChangeSui: "0 SUI",
   gasFeeSui: "-",
-}
+};
 
 const OLD_PACKAGE_ERROR =
-  "Selected mandate belongs to an old package. Create a new mandate with the current package."
+  "Selected mandate belongs to an old package. Create a new mandate with the current package.";
 
-let loggedPackageId = false
+let loggedPackageId = false;
 
 function readSection(output: string, label: string) {
-  const match = output.match(new RegExp(`${label}:\\s*\\n([^\\n]*)`))
-  return match?.[1]?.trim() ?? ""
+  const match = output.match(new RegExp(`${label}:\\s*\\n([^\\n]*)`));
+  return match?.[1]?.trim() ?? "";
 }
 
 function readEnvFileValue(filePath: string, name: string) {
   try {
-    const raw = fs.readFileSync(filePath, "utf8")
+    const raw = fs.readFileSync(filePath, "utf8");
     const line = raw
       .split(/\r?\n/)
-      .find((entry) => entry.trim().startsWith(`${name}=`))
+      .find((entry) => entry.trim().startsWith(`${name}=`));
     if (!line) {
-      return undefined
+      return undefined;
     }
-    return line.slice(line.indexOf("=") + 1).trim().replace(/^['"]|['"]$/g, "")
+    return line
+      .slice(line.indexOf("=") + 1)
+      .trim()
+      .replace(/^['"]|['"]$/g, "");
   } catch {
-    return undefined
+    return undefined;
   }
 }
 
@@ -86,32 +89,28 @@ function runtimeEnvValue(name: string, repoRoot: string) {
     readEnvFileValue(path.join(process.cwd(), ".env.local"), name) ||
     readEnvFileValue(path.join(repoRoot, ".env.local"), name) ||
     readEnvFileValue(path.join(repoRoot, ".env"), name)
-  )
+  );
 }
 
 function findRepoRoot() {
-  const cwd = process.cwd()
-  const candidates = [
-    cwd,
-    path.resolve(cwd, "../.."),
-    path.resolve(cwd, ".."),
-  ]
+  const cwd = process.cwd();
+  const candidates = [cwd, path.resolve(cwd, "../.."), path.resolve(cwd, "..")];
 
   return (
     candidates.find((candidate) =>
-      fs.existsSync(path.join(candidate, "scripts/agent-deepbook-swap.ts"))
+      fs.existsSync(path.join(candidate, "scripts/agent-deepbook-swap.ts")),
     ) ?? path.resolve(cwd, "../..")
-  )
+  );
 }
 
 function runtimePackageId(repoRoot: string) {
-  const serverPackageId = runtimeEnvValue("PACKAGE_ID", repoRoot)
-  const publicPackageId = runtimeEnvValue("NEXT_PUBLIC_PACKAGE_ID", repoRoot)
+  const serverPackageId = runtimeEnvValue("PACKAGE_ID", repoRoot);
+  const publicPackageId = runtimeEnvValue("NEXT_PUBLIC_PACKAGE_ID", repoRoot);
 
   if (!serverPackageId && !publicPackageId) {
     throw new Error(
-      "PACKAGE_ID is not configured. Set PACKAGE_ID and NEXT_PUBLIC_PACKAGE_ID in .env.local, then restart Next.js."
-    )
+      "PACKAGE_ID is not configured. Set PACKAGE_ID and NEXT_PUBLIC_PACKAGE_ID in .env.local, then restart Next.js.",
+    );
   }
 
   if (
@@ -120,54 +119,56 @@ function runtimePackageId(repoRoot: string) {
     serverPackageId.toLowerCase() !== publicPackageId.toLowerCase()
   ) {
     throw new Error(
-      "PACKAGE_ID and NEXT_PUBLIC_PACKAGE_ID do not match. Update .env.local so frontend and backend use the same Mandate package."
-    )
+      "PACKAGE_ID and NEXT_PUBLIC_PACKAGE_ID do not match. Update .env.local so frontend and backend use the same Mandate package.",
+    );
   }
 
-  const packageId = serverPackageId ?? publicPackageId
+  const packageId = serverPackageId ?? publicPackageId;
   if (!packageId) {
-    throw new Error("PACKAGE_ID is not configured.")
+    throw new Error("PACKAGE_ID is not configured.");
   }
   if (
     LEGACY_POLICY_PACKAGE_IDS.some(
       (legacyPackageId) =>
-        normalizeSuiAddress(legacyPackageId) === normalizeSuiAddress(packageId)
+        normalizeSuiAddress(legacyPackageId) === normalizeSuiAddress(packageId),
     )
   ) {
     throw new Error(
-      "PACKAGE_ID points to a legacy policy-only package. Publish the vault package, update PACKAGE_ID/NEXT_PUBLIC_PACKAGE_ID, and restart Next.js."
-    )
+      "PACKAGE_ID points to a legacy policy-only package. Publish the vault package, update PACKAGE_ID/NEXT_PUBLIC_PACKAGE_ID, and restart Next.js.",
+    );
   }
 
   if (process.env.NODE_ENV !== "production" && !loggedPackageId) {
-    console.info(`[MANDATE] API using PACKAGE_ID ${packageId}`)
-    loggedPackageId = true
+    console.info(`[MANDATE] API using PACKAGE_ID ${packageId}`);
+    loggedPackageId = true;
   }
 
-  return packageId
+  return packageId;
 }
 
 function runtimeAgentPrivateKey(repoRoot: string) {
   const agentPrivateKey =
     runtimeEnvValue("BACKEND_AGENT_PRIVATE_KEY", repoRoot) ??
-    runtimeEnvValue("AGENT_PRIVATE_KEY", repoRoot)
+    runtimeEnvValue("AGENT_PRIVATE_KEY", repoRoot);
 
   if (!agentPrivateKey) {
     throw new Error(
-      "BACKEND_AGENT_PRIVATE_KEY is not configured. Set BACKEND_AGENT_PRIVATE_KEY in .env.local so Run Agent can be signed by the backend agent signer."
-    )
+      "BACKEND_AGENT_PRIVATE_KEY is not configured. Set BACKEND_AGENT_PRIVATE_KEY in .env.local so Run Agent can be signed by the backend agent signer.",
+    );
   }
 
-  return agentPrivateKey
+  return agentPrivateKey;
 }
 
 function agentAddressFromPrivateKey(agentPrivateKey: string) {
-  const { secretKey, scheme } = decodeSuiPrivateKey(agentPrivateKey)
+  const { secretKey, scheme } = decodeSuiPrivateKey(agentPrivateKey);
   if (scheme !== "ED25519") {
-    throw new Error(`BACKEND_AGENT_PRIVATE_KEY must be an ED25519 Sui private key, got ${scheme}.`)
+    throw new Error(
+      `BACKEND_AGENT_PRIVATE_KEY must be an ED25519 Sui private key, got ${scheme}.`,
+    );
   }
 
-  return Ed25519Keypair.fromSecretKey(secretKey).toSuiAddress()
+  return Ed25519Keypair.fromSecretKey(secretKey).toSuiAddress();
 }
 
 function runtimeBackendAgentAddress(repoRoot: string) {
@@ -175,89 +176,117 @@ function runtimeBackendAgentAddress(repoRoot: string) {
     runtimeEnvValue("NEXT_PUBLIC_BACKEND_AGENT_ADDRESS", repoRoot) ??
     runtimeEnvValue("NEXT_PUBLIC_VERIFIED_AGENT_ADDRESS", repoRoot) ??
     BACKEND_AGENT_ADDRESS
-  )
+  );
 }
 
 function routePoolIdEnvNames(routeId: string) {
   if (routeId === "sui_momentum_buy") {
-    return ["NEXT_PUBLIC_DEEPBOOK_POOL_ID_SUI_DBUSDC", "DEEPBOOK_POOL_ID_SUI_DBUSDC"]
+    return [
+      "NEXT_PUBLIC_DEEPBOOK_POOL_ID_SUI_DBUSDC",
+      "NEXT_PUBLIC_DEEPBOOK_POOL_ID_SUI_DUSDC",
+      "DEEPBOOK_POOL_ID_SUI_DBUSDC",
+      "DEEPBOOK_POOL_ID_SUI_DUSDC",
+    ];
   }
 
   return [
     "NEXT_PUBLIC_DEEPBOOK_POOL_ID_DEEP_SUI",
     "NEXT_PUBLIC_DEEPBOOK_POOL_ID",
     "DEEPBOOK_POOL_ID",
-  ]
+  ];
 }
 
-function runtimeDeepBookPoolId(repoRoot: string, routeId: string, configuredPoolId: string) {
+function runtimeDeepBookPoolId(
+  repoRoot: string,
+  routeId: string,
+  configuredPoolId: string,
+) {
   const poolId =
     routePoolIdEnvNames(routeId)
       .map((name) => runtimeEnvValue(name, repoRoot))
-      .find(Boolean) ?? configuredPoolId
+      .find(Boolean) ?? configuredPoolId;
 
   if (!poolId) {
     throw new Error(
-      `DeepBook swap unavailable; fallback transfer disabled. Missing pool id for route ${routeId}.`
-    )
+      `DeepBook swap unavailable; fallback transfer disabled. Missing pool id for route ${routeId}.`,
+    );
   }
 
-  return poolId
+  return poolId;
 }
 
 function assertBackendAgentMatchesSigner(
   expectedAgentAddress: string,
-  agentPrivateKey: string
+  agentPrivateKey: string,
 ) {
-  const signerAddress = agentAddressFromPrivateKey(agentPrivateKey)
+  const signerAddress = agentAddressFromPrivateKey(agentPrivateKey);
 
   if (
-    normalizeSuiAddress(expectedAgentAddress) !== normalizeSuiAddress(signerAddress)
+    normalizeSuiAddress(expectedAgentAddress) !==
+    normalizeSuiAddress(signerAddress)
   ) {
     throw new Error(
-      "NEXT_PUBLIC_BACKEND_AGENT_ADDRESS does not match BACKEND_AGENT_PRIVATE_KEY. Update .env.local so the Mandate backend agent address and backend agent signer are the same wallet."
-    )
+      "NEXT_PUBLIC_BACKEND_AGENT_ADDRESS does not match BACKEND_AGENT_PRIVATE_KEY. Update .env.local so the Mandate backend agent address and backend agent signer are the same wallet.",
+    );
   }
 }
 
 function normalizeSuiAddress(value?: string | null) {
-  const raw = value?.trim().toLowerCase()
+  const raw = value?.trim().toLowerCase();
   if (!raw) {
-    return ""
+    return "";
   }
 
-  const withoutPrefix = raw.startsWith("0x") ? raw.slice(2) : raw
-  const normalized = withoutPrefix.replace(/^0+/, "") || "0"
-  return `0x${normalized}`
+  const withoutPrefix = raw.startsWith("0x") ? raw.slice(2) : raw;
+  const normalized = withoutPrefix.replace(/^0+/, "") || "0";
+  return `0x${normalized}`;
 }
 
 function mandatePackageFromObjectType(objectType?: string | null) {
-  return objectType?.split("::")[0] ?? ""
+  return objectType?.split("::")[0] ?? "";
 }
 
-function isCurrentMandateObjectType(objectType: string | undefined, packageId: string) {
-  if (!objectType?.endsWith("::mandate::Mandate")) {
-    return false
+function isCurrentMandateObjectType(
+  objectType: string | undefined,
+  packageId: string,
+) {
+  if (
+    !objectType?.endsWith("::mandate::Mandate") &&
+    !objectType?.includes("::mandate::AssetMandate<")
+  ) {
+    return false;
   }
 
   return (
     normalizeSuiAddress(mandatePackageFromObjectType(objectType)) ===
     normalizeSuiAddress(packageId)
-  )
+  );
+}
+
+function mandateObjectMatchesRoute(
+  objectType: string | undefined,
+  routeId: string,
+) {
+  if (routeId === "sui_momentum_buy") {
+    return Boolean(objectType?.includes("::mandate::AssetMandate<"));
+  }
+
+  return Boolean(objectType?.endsWith("::mandate::Mandate"));
 }
 
 function fullnodeUrl() {
-  const network = runtimeEnvValue("NEXT_PUBLIC_SUI_NETWORK", findRepoRoot()) ?? "testnet"
+  const network =
+    runtimeEnvValue("NEXT_PUBLIC_SUI_NETWORK", findRepoRoot()) ?? "testnet";
   if (network === "mainnet") {
-    return "https://fullnode.mainnet.sui.io:443"
+    return "https://fullnode.mainnet.sui.io:443";
   }
   if (network === "devnet") {
-    return "https://fullnode.devnet.sui.io:443"
+    return "https://fullnode.devnet.sui.io:443";
   }
   if (network === "localnet") {
-    return "http://127.0.0.1:9000"
+    return "http://127.0.0.1:9000";
   }
-  return "https://fullnode.testnet.sui.io:443"
+  return "https://fullnode.testnet.sui.io:443";
 }
 
 async function fetchMandateObjectType(mandateId: string) {
@@ -275,53 +304,62 @@ async function fetchMandateObjectType(mandateId: string) {
         },
       ],
     }),
-  })
+  });
 
   if (!response.ok) {
-    throw new Error(`Unable to fetch mandate object type: HTTP ${response.status}`)
+    throw new Error(
+      `Unable to fetch mandate object type: HTTP ${response.status}`,
+    );
   }
 
   const payload = (await response.json()) as {
-    error?: { message?: string }
+    error?: { message?: string };
     result?: {
       data?: {
         content?: {
-          dataType?: string
-          type?: string
+          dataType?: string;
+          type?: string;
           fields?: {
-            owner?: string
-          }
-        }
-      }
-    }
-  }
+            owner?: string;
+          };
+        };
+      };
+    };
+  };
 
   if (payload.error) {
-    throw new Error(payload.error.message ?? "Unable to fetch mandate object type")
+    throw new Error(
+      payload.error.message ?? "Unable to fetch mandate object type",
+    );
   }
 
-  const content = payload.result?.data?.content
+  const content = payload.result?.data?.content;
   return content?.dataType === "moveObject"
     ? { objectType: content.type, owner: content.fields?.owner }
-    : { objectType: undefined, owner: undefined }
+    : { objectType: undefined, owner: undefined };
 }
 
 function parseAgentOutput(output: string, error?: string): AgentRunResult {
-  const status = readSection(output, "Status")
-  const blockedReasonText = readSection(output, "Blocked Reason")
-  const errorText = error ?? readSection(output, "Failure Reason")
-  const blockedReason = classifyBlockedReason(errorText)
-  const outputCoinObjects = readSection(output, "Output Coin Objects")
+  const status = readSection(output, "Status");
+  const blockedReasonText = readSection(output, "Blocked Reason");
+  const errorText = error ?? readSection(output, "Failure Reason");
+  const blockedReason = classifyBlockedReason(errorText);
+  const outputCoinObjects = readSection(output, "Output Coin Objects");
   const outputCoinObjectIds =
     outputCoinObjects && outputCoinObjects !== "-"
-      ? outputCoinObjects.split(",").map((id) => id.trim()).filter(Boolean)
-      : []
-  const outputAsset = readSection(output, "Output Asset")
-  const outputCoinType = readSection(output, "Output Coin Type")
-  const outputAmount = readSection(output, "Output Amount")
-  const residualSui = readSection(output, "Residual SUI")
-  const outputOwner = readSection(output, "Output Owner")
-  const fillStatus = readSection(output, "Fill Status")
+      ? outputCoinObjects
+          .split(",")
+          .map((id) => id.trim())
+          .filter(Boolean)
+      : [];
+  const outputAsset = readSection(output, "Output Asset");
+  const outputCoinType = readSection(output, "Output Coin Type");
+  const outputAmount = readSection(output, "Output Amount");
+  const residualSui =
+    readSection(output, "Residual SUI") ||
+    readSection(output, "Residual DeepBook USDC");
+  const outputOwner = readSection(output, "Output Owner");
+  const fillStatus = readSection(output, "Fill Status");
   return {
     digest: readSection(output, "Digest"),
     status:
@@ -352,151 +390,151 @@ function parseAgentOutput(output: string, error?: string): AgentRunResult {
       ? { blockedReason: blockedReasonText || blockedReason }
       : {}),
     ...(errorText ? { error: errorText } : {}),
-  }
+  };
 }
 
 function classifyBlockedReason(message?: string) {
-  const lower = message?.toLowerCase() ?? ""
+  const lower = message?.toLowerCase() ?? "";
   if (!lower) {
-    return undefined
+    return undefined;
   }
 
   if (lower.includes("abort code: 2") || lower.includes("abort_code: 2")) {
-    return "agent wallet mismatch"
+    return "agent wallet mismatch";
   }
   if (lower.includes("abort code: 3") || lower.includes("abort_code: 3")) {
-    return "revoked"
+    return "revoked";
   }
   if (lower.includes("abort code: 4") || lower.includes("abort_code: 4")) {
-    return "expired"
+    return "expired";
   }
   if (lower.includes("abort code: 5") || lower.includes("abort_code: 5")) {
-    return "protocol not allowed"
+    return "protocol not allowed";
   }
   if (lower.includes("abort code: 6") || lower.includes("abort_code: 6")) {
-    return "exceeds per-tx cap"
+    return "exceeds per-tx cap";
   }
   if (lower.includes("abort code: 7") || lower.includes("abort_code: 7")) {
-    return "exceeds remaining budget"
+    return "exceeds remaining budget";
   }
   if (lower.includes("moveabort") || lower.includes("move abort")) {
-    return "Move policy rejected the agent action"
+    return "Move policy rejected the agent action";
   }
 
-  return undefined
+  return undefined;
 }
 
 function executionLogStatus(result: AgentRunResult) {
   if (result.status === "BLOCKED") {
-    return "blocked"
+    return "blocked";
   }
   if (result.status === "FAILED") {
-    return "failed"
+    return "failed";
   }
-  return result.fillStatus ?? "success"
+  return result.fillStatus ?? "success";
 }
 
 async function readAgentRequest(request: Request) {
   try {
-    return (await request.json()) as AgentRunRequest
+    return (await request.json()) as AgentRunRequest;
   } catch {
-    return {}
+    return {};
   }
 }
 
 function requestMandateId(body: AgentRunRequest) {
   if (typeof body.mandateId === "string" && body.mandateId.trim()) {
-    return body.mandateId.trim()
+    return body.mandateId.trim();
   }
 
   throw new Error(
-    "mandateId is required. Automation must explicitly select a Mandate; MANDATE_ID is only a local script/debug fallback."
-  )
+    "mandateId is required. Automation must explicitly select a Mandate; MANDATE_ID is only a local script/debug fallback.",
+  );
 }
 
 function requestOwnerAddress(body: AgentRunRequest) {
   if (typeof body.ownerAddress === "string" && body.ownerAddress.trim()) {
-    return body.ownerAddress.trim()
+    return body.ownerAddress.trim();
   }
 
-  throw new Error("ownerAddress is required for stateless agent execution.")
+  throw new Error("ownerAddress is required for stateless agent execution.");
 }
 
 function requestAmountSui(body: AgentRunRequest) {
   return typeof body.amountSui === "number" && Number.isFinite(body.amountSui)
     ? String(body.amountSui)
-    : "0.001"
+    : "0.001";
 }
 
 function requestStrategy(body: AgentRunRequest) {
-  return typeof body.strategy === "string" ? body.strategy : "normal"
+  return typeof body.strategy === "string" ? body.strategy : "normal";
 }
 
 function requestTradingRoute(body: AgentRunRequest) {
   const route =
     typeof body.routeId === "string"
       ? tradingRouteById(body.routeId)
-      : defaultTradingRoute()
+      : defaultTradingRoute();
 
   if (!route) {
-    throw new Error(`Unknown trading route: ${String(body.routeId)}`)
+    throw new Error(`Unknown trading route: ${String(body.routeId)}`);
   }
   if (!route.action.executable) {
     throw new Error(
       route.action.unavailableReason ??
-        `Trading route ${route.id} is not executable in this build.`
-    )
+        `Trading route ${route.id} is not executable in this build.`,
+    );
   }
 
-  return route
+  return route;
 }
 
 function requestBlockedReason(body: AgentRunRequest) {
-  const strategy = requestStrategy(body)
+  const strategy = requestStrategy(body);
   if (strategy === "exceed_per_tx") {
-    return "exceeds_per_tx_cap"
+    return "exceeds_per_tx_cap";
   }
   if (strategy === "exceed_budget") {
-    return "exceeds_remaining_budget"
+    return "exceeds_remaining_budget";
   }
   if (strategy === "revoked_expired") {
-    return "mandate_inactive_or_expired"
+    return "mandate_inactive_or_expired";
   }
 
-  return undefined
+  return undefined;
 }
 
 export async function POST(request: Request) {
-  const repoRoot = findRepoRoot()
-  const body = await readAgentRequest(request)
-  let mandateId: string
-  let ownerAddress: string
-  let amountSui: string
-  let blockedReason: string | undefined
-  let packageId: string
-  let agentPrivateKey: string
-  let backendAgentAddress: string
-  let deepBookPoolId: string
-  let tradingRoute: ReturnType<typeof requestTradingRoute>
+  const repoRoot = findRepoRoot();
+  const body = await readAgentRequest(request);
+  let mandateId: string;
+  let ownerAddress: string;
+  let amountSui: string;
+  let blockedReason: string | undefined;
+  let packageId: string;
+  let agentPrivateKey: string;
+  let backendAgentAddress: string;
+  let deepBookPoolId: string;
+  let tradingRoute: ReturnType<typeof requestTradingRoute>;
 
   try {
-    mandateId = requestMandateId(body)
-    ownerAddress = requestOwnerAddress(body)
-    amountSui = requestAmountSui(body)
-    blockedReason = requestBlockedReason(body)
-    tradingRoute = requestTradingRoute(body)
-    packageId = runtimePackageId(repoRoot)
-    agentPrivateKey = runtimeAgentPrivateKey(repoRoot)
-    backendAgentAddress = runtimeBackendAgentAddress(repoRoot)
+    mandateId = requestMandateId(body);
+    ownerAddress = requestOwnerAddress(body);
+    amountSui = requestAmountSui(body);
+    blockedReason = requestBlockedReason(body);
+    tradingRoute = requestTradingRoute(body);
+    packageId = runtimePackageId(repoRoot);
+    agentPrivateKey = runtimeAgentPrivateKey(repoRoot);
+    backendAgentAddress = runtimeBackendAgentAddress(repoRoot);
     deepBookPoolId = runtimeDeepBookPoolId(
       repoRoot,
       tradingRoute.id,
-      tradingRoute.action.poolId
-    )
-    assertBackendAgentMatchesSigner(backendAgentAddress, agentPrivateKey)
+      tradingRoute.action.poolId,
+    );
+    assertBackendAgentMatchesSigner(backendAgentAddress, agentPrivateKey);
   } catch (caught) {
-    const error = caught instanceof Error ? caught.message : String(caught)
-    return Response.json({ ...EMPTY_RESULT, error }, { status: 400 })
+    const error = caught instanceof Error ? caught.message : String(caught);
+    return Response.json({ ...EMPTY_RESULT, error }, { status: 400 });
   }
 
   console.info("[MANDATE] agent run request", {
@@ -510,34 +548,54 @@ export async function POST(request: Request) {
     poolId: deepBookPoolId,
     spendAsset: tradingRoute.action.spendAsset,
     buyAsset: tradingRoute.action.buyAsset,
-  })
+  });
 
   try {
-    const { objectType, owner } = await fetchMandateObjectType(mandateId)
+    const { objectType, owner } = await fetchMandateObjectType(mandateId);
     if (!isCurrentMandateObjectType(objectType, packageId)) {
       return Response.json(
         {
           ...EMPTY_RESULT,
-          error: `${OLD_PACKAGE_ERROR} Expected ${packageId}::mandate::Mandate, got ${objectType ?? "unknown object type"}.`,
+          error: `${OLD_PACKAGE_ERROR} Expected current-package Mandate or AssetMandate, got ${objectType ?? "unknown object type"}.`,
         },
-        { status: 400 }
-      )
+        { status: 400 },
+      );
     }
-    if (owner && normalizeSuiAddress(owner) !== normalizeSuiAddress(ownerAddress)) {
+    if (!mandateObjectMatchesRoute(objectType, tradingRoute.id)) {
+      return Response.json(
+        {
+          ...EMPTY_RESULT,
+          error:
+            tradingRoute.id === "sui_momentum_buy"
+              ? "Selected mandate uses SUI vault, but this route requires DUSDC vault."
+              : "Selected mandate uses an asset vault, but this route requires SUI vault.",
+        },
+        { status: 400 },
+      );
+    }
+    if (
+      owner &&
+      normalizeSuiAddress(owner) !== normalizeSuiAddress(ownerAddress)
+    ) {
       return Response.json(
         {
           ...EMPTY_RESULT,
           error: `Selected mandate owner mismatch. Request owner ${ownerAddress}, object owner ${owner}.`,
         },
-        { status: 403 }
-      )
+        { status: 403 },
+      );
     }
   } catch (caught) {
-    const error = caught instanceof Error ? caught.message : String(caught)
-    return Response.json({ ...EMPTY_RESULT, error }, { status: 500 })
+    const error = caught instanceof Error ? caught.message : String(caught);
+    return Response.json({ ...EMPTY_RESULT, error }, { status: 500 });
   }
 
   try {
+    const DUSDCCoinType =
+      runtimeEnvValue("NEXT_PUBLIC_DBUSDC_COIN_TYPE", repoRoot) ??
+      runtimeEnvValue("NEXT_PUBLIC_DUSDC_COIN_TYPE", repoRoot) ??
+      "";
+
     const { stdout, stderr } = await execFileAsync(
       "npm",
       ["run", blockedReason ? "agent:block" : "agent:swap", "--silent"],
@@ -555,6 +613,8 @@ export async function POST(request: Request) {
           POOL_KEY: tradingRoute.action.poolKey,
           DEEPBOOK_POOL_ID: deepBookPoolId,
           NEXT_PUBLIC_DEEPBOOK_POOL_ID: deepBookPoolId,
+          NEXT_PUBLIC_DBUSDC_COIN_TYPE: DUSDCCoinType,
+          NEXT_PUBLIC_DUSDC_COIN_TYPE: DUSDCCoinType,
           AMOUNT_SUI: amountSui,
           SPEND_ASSET: tradingRoute.action.spendAsset,
           BUY_ASSET: tradingRoute.action.buyAsset,
@@ -563,10 +623,10 @@ export async function POST(request: Request) {
         },
         timeout: 120_000,
         maxBuffer: 1024 * 1024,
-      }
-    )
+      },
+    );
 
-    const result = parseAgentOutput(stdout, stderr.trim() || undefined)
+    const result = parseAgentOutput(stdout, stderr.trim() || undefined);
     console.info("[MANDATE] agent run result", {
       owner: ownerAddress,
       mandateId,
@@ -576,18 +636,20 @@ export async function POST(request: Request) {
       poolKey: tradingRoute.action.poolKey,
       poolId: deepBookPoolId,
       status: executionLogStatus(result),
-    })
-    return Response.json(result, { status: result.status === "FAILED" ? 500 : 200 })
+    });
+    return Response.json(result, {
+      status: result.status === "FAILED" ? 500 : 200,
+    });
   } catch (caught) {
     const error = caught as {
-      stdout?: string
-      stderr?: string
-      message?: string
-    }
-    const output = `${error.stdout ?? ""}\n${error.stderr ?? ""}`
+      stdout?: string;
+      stderr?: string;
+      message?: string;
+    };
+    const output = `${error.stdout ?? ""}\n${error.stderr ?? ""}`;
     const result = output.trim()
       ? parseAgentOutput(output, error.stderr?.trim() || error.message)
-      : { ...EMPTY_RESULT, error: error.message ?? "Agent execution failed" }
+      : { ...EMPTY_RESULT, error: error.message ?? "Agent execution failed" };
 
     console.info("[MANDATE] agent run result", {
       owner: ownerAddress,
@@ -598,7 +660,9 @@ export async function POST(request: Request) {
       poolKey: tradingRoute.action.poolKey,
       poolId: deepBookPoolId,
       status: executionLogStatus(result),
-    })
-    return Response.json(result, { status: result.status === "BLOCKED" ? 200 : 500 })
+    });
+    return Response.json(result, {
+      status: result.status === "BLOCKED" ? 200 : 500,
+    });
   }
 }

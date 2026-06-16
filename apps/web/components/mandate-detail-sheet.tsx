@@ -1,129 +1,141 @@
-"use client"
+"use client";
 
-import * as React from "react"
+import * as React from "react";
 import {
   useCurrentAccount,
   useSignAndExecuteTransaction,
   useSuiClient,
-} from "@mysten/dapp-kit"
-import { Transaction } from "@mysten/sui/transactions"
-import type { SuiTransactionBlockResponse } from "@mysten/sui/jsonRpc"
+} from "@mysten/dapp-kit";
+import { Transaction } from "@mysten/sui/transactions";
+import type { SuiTransactionBlockResponse } from "@mysten/sui/jsonRpc";
 import {
   AlertTriangle,
   Ban,
   CheckCircle2,
   ShieldCheck,
   WalletCards,
-} from "lucide-react"
+} from "lucide-react";
 
-import { ActivityFeed } from "@/components/activity-feed"
-import { BudgetMeter } from "@/components/budget-meter"
-import { CopyableId } from "@/components/copyable-id"
-import { ExplorerLink } from "@/components/explorer-link"
-import { StatusBadge } from "@/components/status-badges"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { ActivityFeed } from "@/components/activity-feed";
+import { BudgetMeter } from "@/components/budget-meter";
+import { CopyableId } from "@/components/copyable-id";
+import { ExplorerLink } from "@/components/explorer-link";
+import { StatusBadge } from "@/components/status-badges";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Sheet,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
-} from "@/components/ui/sheet"
-import { Separator } from "@/components/ui/separator"
+} from "@/components/ui/sheet";
+import { Separator } from "@/components/ui/separator";
 import {
   CLOCK_OBJECT_ID,
+  DUSDC_COIN_TYPE,
   DEEPBOOK_POOL_ID,
   DEEPBOOK_POOL_KEY,
   isCurrentMandateObjectType,
   NETWORK,
   normalizeSuiAddress,
   PACKAGE_ID,
-} from "@/lib/chain-config"
-import { sortActivitiesByTimeDesc } from "@/lib/activity-utils"
-import { formatSui, stableExpiryLabel } from "@/lib/format"
-import { useMandateStore } from "@/lib/mandate-store"
-import { getMandateObject } from "@/lib/sui-rpc"
-import { cn } from "@/lib/utils"
+} from "@/lib/chain-config";
+import { sortActivitiesByTimeDesc } from "@/lib/activity-utils";
+import { formatSui, stableExpiryLabel } from "@/lib/format";
+import { useMandateStore } from "@/lib/mandate-store";
+import { getMandateObject } from "@/lib/sui-rpc";
+import { cn } from "@/lib/utils";
 
-const REVOKE_TIMEOUT_MS = 180_000
+const REVOKE_TIMEOUT_MS = 180_000;
 const OLD_PACKAGE_MESSAGE =
-  "This mandate was created by an older package. Create a new mandate with the latest package to revoke or test policy actions."
+  "This mandate was created by an older package. Create a new mandate with the latest package to revoke or test policy actions.";
 
 function executionTime(timestamp: number) {
-  const diffMs = Date.now() - timestamp
+  const diffMs = Date.now() - timestamp;
   if (!Number.isFinite(timestamp) || diffMs < 60_000) {
-    return "just now"
+    return "just now";
   }
 
-  const mins = Math.floor(diffMs / 60_000)
+  const mins = Math.floor(diffMs / 60_000);
   if (mins < 60) {
-    return `${mins}m ago`
+    return `${mins}m ago`;
   }
 
-  const hours = Math.floor(diffMs / 3_600_000)
+  const hours = Math.floor(diffMs / 3_600_000);
   if (hours < 24) {
-    return `${hours}h ago`
+    return `${hours}h ago`;
   }
 
-  return `${Math.floor(hours / 24)}d ago`
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 function executionOutputSummary(execution: {
-  outputAmount?: string
-  outputAsset?: string
-  outputCoinObjectIds?: string[]
-  residualSuiAmount?: number
-  fillStatus?: "filled" | "no_fill" | "amount_unavailable"
+  outputAmount?: string;
+  outputAsset?: string;
+  outputCoinObjectIds?: string[];
+  residualSuiAmount?: number;
+  fillStatus?: "filled" | "no_fill" | "amount_unavailable";
 }) {
   if (execution.fillStatus === "no_fill") {
-    return "No DEEP filled"
+    return `No ${execution.outputAsset ?? "output"} filled`;
   }
   if (execution.outputAmount) {
-    return execution.outputAmount
+    return execution.outputAmount;
   }
-  return "Amount unavailable"
+  return "Amount unavailable";
+}
+
+function formatMandateAsset(value: number, mandate?: { assetSymbol?: string }) {
+  if (mandate?.assetSymbol && mandate.assetSymbol !== "SUI") {
+    return `${value.toLocaleString("en-US", {
+      maximumFractionDigits: 6,
+      useGrouping: false,
+    })} ${mandate.assetSymbol}`;
+  }
+
+  return formatSui(value);
 }
 
 function executionFillLabel(execution: {
-  status: string
-  fillStatus?: "filled" | "no_fill" | "amount_unavailable"
+  status: string;
+  fillStatus?: "filled" | "no_fill" | "amount_unavailable";
 }) {
   if (execution.status === "failed") {
-    return "Failed"
+    return "Failed";
   }
   if (execution.fillStatus === "filled") {
-    return "Filled"
+    return "Filled";
   }
   if (execution.fillStatus === "no_fill") {
-    return "No fill"
+    return "No fill";
   }
-  return "Amount unavailable"
+  return "Amount unavailable";
 }
 
 function executionFillClass(execution: {
-  status: string
-  fillStatus?: "filled" | "no_fill" | "amount_unavailable"
+  status: string;
+  fillStatus?: "filled" | "no_fill" | "amount_unavailable";
 }) {
   if (execution.status === "failed") {
-    return "border-destructive/30 bg-destructive/10 text-destructive"
+    return "border-destructive/30 bg-destructive/10 text-destructive";
   }
   if (execution.fillStatus === "filled") {
-    return "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
+    return "border-emerald-500/25 bg-emerald-500/10 text-emerald-400";
   }
   if (execution.fillStatus === "no_fill") {
-    return "border-amber-500/25 bg-amber-500/10 text-amber-400"
+    return "border-amber-500/25 bg-amber-500/10 text-amber-400";
   }
-  return "border-border bg-background/60 text-muted-foreground"
+  return "border-border bg-background/60 text-muted-foreground";
 }
 
 function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error)
+  return error instanceof Error ? error.message : String(error);
 }
 
 function isCancellationLikeError(error: unknown) {
-  const message = getErrorMessage(error).toLowerCase()
+  const message = getErrorMessage(error).toLowerCase();
   return (
     message.includes("cancel") ||
     message.includes("reject") ||
@@ -131,27 +143,31 @@ function isCancellationLikeError(error: unknown) {
     message.includes("timeout") ||
     message.includes("closed") ||
     message.includes("user denied")
-  )
+  );
 }
 
 function withRevokeTimeout<T>(promise: Promise<T>) {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
   const timeout = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
-      reject(new Error("Wallet signing timeout or interruption"))
-    }, REVOKE_TIMEOUT_MS)
-  })
+      reject(new Error("Wallet signing timeout or interruption"));
+    }, REVOKE_TIMEOUT_MS);
+  });
 
   return Promise.race([promise, timeout]).finally(() => {
     if (timeoutId) {
-      clearTimeout(timeoutId)
+      clearTimeout(timeoutId);
     }
-  })
+  });
 }
 
-function objectTypeFromResponse(response: Awaited<ReturnType<typeof getMandateObject>>) {
-  const content = response.data?.content
-  return content && content.dataType === "moveObject" ? content.type : undefined
+function objectTypeFromResponse(
+  response: Awaited<ReturnType<typeof getMandateObject>>,
+) {
+  const content = response.data?.content;
+  return content && content.dataType === "moveObject"
+    ? content.type
+    : undefined;
 }
 
 function DetailMetric({
@@ -159,16 +175,16 @@ function DetailMetric({
   value,
   tone,
 }: {
-  label: string
-  value: React.ReactNode
-  tone?: "danger" | "primary"
+  label: string;
+  value: React.ReactNode;
+  tone?: "danger" | "primary";
 }) {
   return (
     <div
       className={cn(
         "rounded-lg border border-border bg-card/70 p-3",
         tone === "danger" && "border-destructive/25 bg-destructive/10",
-        tone === "primary" && "border-primary/25 bg-primary/10"
+        tone === "primary" && "border-primary/25 bg-primary/10",
       )}
     >
       <p className="text-xs text-muted-foreground">{label}</p>
@@ -176,7 +192,7 @@ function DetailMetric({
         {value}
       </div>
     </div>
-  )
+  );
 }
 
 export function MandateDetailSheet({
@@ -184,72 +200,69 @@ export function MandateDetailSheet({
   startRevokeNonce,
   onOpenChange,
 }: {
-  mandateId: string | null
-  startRevokeNonce?: number
-  onOpenChange: (open: boolean) => void
+  mandateId: string | null;
+  startRevokeNonce?: number;
+  onOpenChange: (open: boolean) => void;
 }) {
-  const {
-    mandates,
-    activity,
-    orders,
-    revokeMandate,
-    refreshMandates,
-  } = useMandateStore()
-  const account = useCurrentAccount()
-  const client = useSuiClient()
-  const [confirmingRevoke, setConfirmingRevoke] = React.useState(false)
-  const [revokeDigest, setRevokeDigest] = React.useState<string | null>(null)
-  const [isRevoking, setRevoking] = React.useState(false)
-  const [revokeError, setRevokeError] = React.useState<string | null>(null)
-  const sheetBodyRef = React.useRef<HTMLDivElement | null>(null)
-  const revokeConfirmRef = React.useRef<HTMLElement | null>(null)
-  const closeTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { mandates, activity, orders, revokeMandate, refreshMandates } =
+    useMandateStore();
+  const account = useCurrentAccount();
+  const client = useSuiClient();
+  const [confirmingRevoke, setConfirmingRevoke] = React.useState(false);
+  const [revokeDigest, setRevokeDigest] = React.useState<string | null>(null);
+  const [isRevoking, setRevoking] = React.useState(false);
+  const [revokeError, setRevokeError] = React.useState<string | null>(null);
+  const sheetBodyRef = React.useRef<HTMLDivElement | null>(null);
+  const revokeConfirmRef = React.useRef<HTMLElement | null>(null);
+  const closeTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
-  const mandate = mandates.find((item) => item.id === mandateId)
+  const mandate = mandates.find((item) => item.id === mandateId);
   const mandateActivity = sortActivitiesByTimeDesc(
-    activity.filter((event) => event.mandateId === mandateId)
-  ).slice(0, 4)
+    activity.filter((event) => event.mandateId === mandateId),
+  ).slice(0, 4);
   const mandateOrders = orders
     .filter((order) => order.mandateId === mandateId)
-    .slice(0, 4)
+    .slice(0, 4);
 
   React.useEffect(() => {
-    setConfirmingRevoke(false)
-    setRevokeDigest(null)
-    setRevokeError(null)
-    setRevoking(false)
+    setConfirmingRevoke(false);
+    setRevokeDigest(null);
+    setRevokeError(null);
+    setRevoking(false);
     if (closeTimeoutRef.current) {
-      clearTimeout(closeTimeoutRef.current)
-      closeTimeoutRef.current = null
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
     }
-    sheetBodyRef.current?.scrollTo({ top: 0 })
-  }, [mandateId])
+    sheetBodyRef.current?.scrollTo({ top: 0 });
+  }, [mandateId]);
 
   React.useEffect(() => {
     return () => {
       if (closeTimeoutRef.current) {
-        clearTimeout(closeTimeoutRef.current)
+        clearTimeout(closeTimeoutRef.current);
       }
-    }
-  }, [])
+    };
+  }, []);
 
   React.useEffect(() => {
     if (!confirmingRevoke) {
-      return
+      return;
     }
 
-    const container = sheetBodyRef.current
-    const target = revokeConfirmRef.current
+    const container = sheetBodyRef.current;
+    const target = revokeConfirmRef.current;
     if (!container || !target) {
-      return
+      return;
     }
 
-    const targetTop = target.offsetTop - container.offsetTop - 16
+    const targetTop = target.offsetTop - container.offsetTop - 16;
     container.scrollTo({
       top: Math.max(targetTop, 0),
       behavior: "smooth",
-    })
-  }, [confirmingRevoke])
+    });
+  }, [confirmingRevoke]);
 
   React.useEffect(() => {
     if (
@@ -259,104 +272,131 @@ export function MandateDetailSheet({
       (Boolean(mandate.objectType) &&
         !isCurrentMandateObjectType(mandate.objectType))
     ) {
-      return
+      return;
     }
 
-    setConfirmingRevoke(true)
-  }, [mandate?.id, mandate?.objectType, mandate?.status, startRevokeNonce])
+    setConfirmingRevoke(true);
+  }, [mandate?.id, mandate?.objectType, mandate?.status, startRevokeNonce]);
 
-  const remaining = mandate ? Math.max(mandate.budget - mandate.spent, 0) : 0
-  const agentAddress = mandate?.agentAddress
-  const ownerAddress = mandate?.ownerAddress
+  const remaining = mandate ? Math.max(mandate.budget - mandate.spent, 0) : 0;
+  const agentAddress = mandate?.agentAddress;
+  const ownerAddress = mandate?.ownerAddress;
   const isLatestPackageMandate =
-    Boolean(mandate) && isCurrentMandateObjectType(mandate?.objectType)
+    Boolean(mandate) && isCurrentMandateObjectType(mandate?.objectType);
   const isKnownOlderPackageMandate =
-    Boolean(mandate?.objectType) && !isLatestPackageMandate
+    Boolean(mandate?.objectType) && !isLatestPackageMandate;
   const isOwnerWallet =
     !mandate?.ownerAddress ||
-    normalizeSuiAddress(account?.address) === normalizeSuiAddress(mandate.ownerAddress)
+    normalizeSuiAddress(account?.address) ===
+      normalizeSuiAddress(mandate.ownerAddress);
   const canRevoke =
-    mandate?.status === "active" && !isKnownOlderPackageMandate && isOwnerWallet
+    mandate?.status === "active" &&
+    !isKnownOlderPackageMandate &&
+    isOwnerWallet;
 
-  const signAndExecute = useSignAndExecuteTransaction<SuiTransactionBlockResponse>({
-    execute: ({ bytes, signature }) =>
-      client.executeTransactionBlock({
-        transactionBlock: bytes,
-        signature,
-        requestType: "WaitForLocalExecution",
-        options: {
-          showEffects: true,
-          showEvents: true,
-          showObjectChanges: true,
-        },
-      }),
-  })
+  const signAndExecute =
+    useSignAndExecuteTransaction<SuiTransactionBlockResponse>({
+      execute: ({ bytes, signature }) =>
+        client.executeTransactionBlock({
+          transactionBlock: bytes,
+          signature,
+          requestType: "WaitForLocalExecution",
+          options: {
+            showEffects: true,
+            showEvents: true,
+            showObjectChanges: true,
+          },
+        }),
+    });
 
   const handleRevoke = async () => {
-    if (!mandate || isRevoking) return
+    if (!mandate || isRevoking) return;
 
-    if (!canRevoke) return
+    if (!canRevoke) return;
 
     if (!isOwnerWallet) {
-      setRevokeError("Only the owner wallet can revoke this mandate.")
-      setConfirmingRevoke(false)
-      return
+      setRevokeError("Only the owner wallet can revoke this mandate.");
+      setConfirmingRevoke(false);
+      return;
     }
 
-    setRevoking(true)
-    setRevokeError(null)
+    setRevoking(true);
+    setRevokeError(null);
 
     try {
       const objectType =
-        mandate.objectType ?? objectTypeFromResponse(await getMandateObject(mandate.id))
+        mandate.objectType ??
+        objectTypeFromResponse(await getMandateObject(mandate.id));
       if (!isCurrentMandateObjectType(objectType)) {
-        setRevokeError(OLD_PACKAGE_MESSAGE)
-        setConfirmingRevoke(false)
-        return
+        setRevokeError(OLD_PACKAGE_MESSAGE);
+        setConfirmingRevoke(false);
+        return;
       }
 
-      const tx = new Transaction()
-      tx.moveCall({
-        target: `${PACKAGE_ID}::mandate::revoke_mandate`,
-        arguments: [tx.object(mandate.id), tx.object(CLOCK_OBJECT_ID)],
-      })
-      tx.moveCall({
-        target: `${PACKAGE_ID}::mandate::withdraw_remaining_sui`,
-        arguments: [tx.object(mandate.id)],
-      })
+      const tx = new Transaction();
+      if (objectType?.includes("::mandate::AssetMandate<")) {
+        if (!DUSDC_COIN_TYPE) {
+          throw new Error(
+            "NEXT_PUBLIC_DBUSDC_COIN_TYPE / NEXT_PUBLIC_DUSDC_COIN_TYPE is not configured.",
+          );
+        }
+        tx.moveCall({
+          target: `${PACKAGE_ID}::mandate::revoke_asset_mandate`,
+          typeArguments: [DUSDC_COIN_TYPE],
+          arguments: [tx.object(mandate.id), tx.object(CLOCK_OBJECT_ID)],
+        });
+        tx.moveCall({
+          target: `${PACKAGE_ID}::mandate::withdraw_remaining_coin`,
+          typeArguments: [DUSDC_COIN_TYPE],
+          arguments: [tx.object(mandate.id)],
+        });
+      } else {
+        tx.moveCall({
+          target: `${PACKAGE_ID}::mandate::revoke_mandate`,
+          arguments: [tx.object(mandate.id), tx.object(CLOCK_OBJECT_ID)],
+        });
+        tx.moveCall({
+          target: `${PACKAGE_ID}::mandate::withdraw_remaining_sui`,
+          arguments: [tx.object(mandate.id)],
+        });
+      }
 
       const result = await withRevokeTimeout(
-        signAndExecute.mutateAsync({ transaction: tx })
-      )
-      const executionStatus = result.effects?.status
+        signAndExecute.mutateAsync({ transaction: tx }),
+      );
+      const executionStatus = result.effects?.status;
 
       if (executionStatus?.status !== "success") {
-        throw new Error(executionStatus?.error ?? "Transaction failed")
+        throw new Error(executionStatus?.error ?? "Transaction failed");
       }
 
-      setRevokeDigest(result.digest)
-      revokeMandate(mandate.id, result.digest)
-      setConfirmingRevoke(false)
-      refreshMandates()
+      setRevokeDigest(result.digest);
+      revokeMandate(mandate.id, result.digest);
+      setConfirmingRevoke(false);
+      refreshMandates();
       if (closeTimeoutRef.current) {
-        clearTimeout(closeTimeoutRef.current)
+        clearTimeout(closeTimeoutRef.current);
       }
       closeTimeoutRef.current = setTimeout(() => {
-        onOpenChange(false)
-      }, 800)
+        onOpenChange(false);
+      }, 800);
     } catch (caught) {
       setRevokeError(
         isCancellationLikeError(caught)
           ? "Transaction was cancelled or interrupted. Please try again."
-          : getErrorMessage(caught)
-      )
+          : getErrorMessage(caught),
+      );
     } finally {
-      setRevoking(false)
+      setRevoking(false);
     }
-  }
+  };
 
   return (
-    <Sheet modal="trap-focus" open={Boolean(mandateId)} onOpenChange={onOpenChange}>
+    <Sheet
+      modal="trap-focus"
+      open={Boolean(mandateId)}
+      onOpenChange={onOpenChange}
+    >
       <SheetContent className="!fixed !right-0 !top-0 z-50 !h-screen w-full overflow-hidden border-border bg-background/95 p-0 backdrop-blur-xl sm:max-w-xl">
         {mandate ? (
           <>
@@ -399,10 +439,12 @@ export function MandateDetailSheet({
                   className="border-destructive/30 bg-destructive/10"
                 >
                   <Ban className="size-4" />
-                  <AlertTitle>Agent actions are blocked by Move policy</AlertTitle>
+                  <AlertTitle>
+                    Agent actions are blocked by Move policy
+                  </AlertTitle>
                   <AlertDescription>
-                    This mandate is revoked. Future agent execution attempts will
-                    be rejected by policy checks.
+                    This mandate is revoked. Future agent execution attempts
+                    will be rejected by policy checks.
                   </AlertDescription>
                 </Alert>
               )}
@@ -455,24 +497,25 @@ export function MandateDetailSheet({
                   spent={mandate.spent}
                   budget={mandate.budget}
                   className="mt-4"
+                  symbol={mandate.assetSymbol ?? "SUI"}
                 />
                 <div className="mt-4 grid grid-cols-2 gap-3">
                   <DetailMetric
                     label="Budget ceiling"
-                    value={formatSui(mandate.budget)}
+                    value={formatMandateAsset(mandate.budget, mandate)}
                     tone="primary"
                   />
                   <DetailMetric
                     label="Remaining"
-                    value={formatSui(remaining)}
+                    value={formatMandateAsset(remaining, mandate)}
                   />
                   <DetailMetric
                     label="Spent"
-                    value={formatSui(mandate.spent)}
+                    value={formatMandateAsset(mandate.spent, mandate)}
                   />
                   <DetailMetric
                     label="Max single transaction"
-                    value={formatSui(mandate.txLimit)}
+                    value={formatMandateAsset(mandate.txLimit, mandate)}
                   />
                 </div>
               </section>
@@ -563,29 +606,43 @@ export function MandateDetailSheet({
                           <p className="mt-1 text-xs text-muted-foreground">
                             {execution.pair ?? DEEPBOOK_POOL_KEY} ·{" "}
                             {execution.side ?? "Buy"} ·{" "}
-                            {typeof execution.amountSui === "number"
-                              ? `${formatSui(execution.amountSui)} input`
-                              : "0.001 SUI input"}{" "}
+                            {typeof execution.inputAmount === "number"
+                              ? `${execution.inputAmount} ${execution.inputAsset ?? "SUI"} input`
+                              : typeof execution.amountSui === "number"
+                                ? `${formatSui(execution.amountSui)} input`
+                                : "0.001 SUI input"}{" "}
                             · {executionTime(execution.timestamp)}
                           </p>
                           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                             <span>
                               Input:{" "}
-                              {typeof execution.amountSui === "number"
-                                ? formatSui(execution.amountSui)
-                                : "0.001 SUI"}
+                              {typeof execution.inputAmount === "number"
+                                ? `${execution.inputAmount} ${execution.inputAsset ?? "SUI"}`
+                                : typeof execution.amountSui === "number"
+                                  ? formatSui(execution.amountSui)
+                                  : "0.001 SUI"}
                             </span>
                             <span>
                               Output: {executionOutputSummary(execution)}
                             </span>
-                            {typeof execution.residualSuiAmount === "number" && (
+                            {typeof execution.residualSuiAmount ===
+                              "number" && (
                               <span>
-                                Residual: {formatSui(execution.residualSuiAmount)}
+                                Residual:{" "}
+                                {formatSui(execution.residualSuiAmount)}
                               </span>
                             )}
+                            {typeof execution.residualAmount === "number" &&
+                              execution.residualAsset && (
+                                <span>
+                                  Residual: {execution.residualAmount}{" "}
+                                  {execution.residualAsset}
+                                </span>
+                              )}
                             {execution.outputCoinObjectIds?.length ? (
                               <span>
-                                Output objects: {execution.outputCoinObjectIds.length}
+                                Output objects:{" "}
+                                {execution.outputCoinObjectIds.length}
                               </span>
                             ) : null}
                             {execution.outputOwner && (
@@ -704,5 +761,5 @@ export function MandateDetailSheet({
         )}
       </SheetContent>
     </Sheet>
-  )
+  );
 }

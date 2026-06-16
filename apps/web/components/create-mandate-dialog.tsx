@@ -45,6 +45,8 @@ import { toast } from "sonner";
 import { AGENTS, useMandateStore } from "@/lib/mandate-store";
 import {
   CLOCK_OBJECT_ID,
+  currentAssetMandateObjectType,
+  DUSDC_COIN_TYPE,
   IS_PUBLIC_PACKAGE_ID_CONFIGURED,
   IS_BACKEND_AGENT_ADDRESS_CONFIGURED,
   IS_LEGACY_POLICY_PACKAGE_ID,
@@ -60,8 +62,10 @@ import {
 import { Loader2 } from "lucide-react";
 
 const PROTOCOL_SCOPE_DEEPBOOK = 1;
-const MIST_PER_SUI = BigInt(1_000_000_000);
 const SIGNING_TIMEOUT_MS = 60_000;
+const DUSDC_DECIMALS = 6;
+const TEST_USDC_VAULT_UNAVAILABLE_REASON =
+  "No fillable DeepBook pool on testnet.";
 const EXPIRATION_OPTIONS = [
   { label: "1h", value: "3600000", durationDays: 1 },
   { label: "12h", value: "43200000", durationDays: 1 },
@@ -70,40 +74,23 @@ const EXPIRATION_OPTIONS = [
 ] as const;
 
 type CreateStatus = "idle" | "signing" | "success" | "error";
+type SpendAsset = "SUI" | "DUSDC";
 
-function parseSuiToMist(value: string) {
+function parseDecimalToUnits(value: string, decimals: number, label: string) {
   const trimmed = value.trim();
   const [wholePart, fractionalPart = ""] = trimmed.split(".");
 
   if (!wholePart || !/^\d+$/.test(wholePart) || !/^\d*$/.test(fractionalPart)) {
-    throw new Error(`Invalid SUI amount: ${value}`);
+    throw new Error(`Invalid ${label}: ${value}`);
   }
 
-  const fractional = fractionalPart.padEnd(9, "0").slice(0, 9);
-  return BigInt(wholePart) * MIST_PER_SUI + BigInt(fractional || "0");
-}
-
-function formatMistAsSui(mist: bigint) {
-  const whole = mist / MIST_PER_SUI;
-  const fractional = (mist % MIST_PER_SUI)
-    .toString()
-    .padStart(9, "0")
-    .replace(/0+$/, "");
-
-  return `${whole.toString()}${fractional ? `.${fractional}` : ""}`;
+  const fractional = fractionalPart.padEnd(decimals, "0").slice(0, decimals);
+  const scalar = BigInt(`1${"0".repeat(decimals)}`);
+  return BigInt(wholePart) * scalar + BigInt(fractional || "0");
 }
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
-}
-
-function getPositiveSuiAmountIssue(value: string, label: string) {
-  try {
-    const mist = parseSuiToMist(value);
-    return mist > BigInt(0) ? null : `${label} must be greater than 0`;
-  } catch {
-    return `${label} must be a valid SUI amount`;
-  }
 }
 
 function isLikelySuiAddress(value: string) {
@@ -145,11 +132,13 @@ function parsedJsonRecord(event: SuiEvent) {
 
 function findCreatedMandateId(result: SuiTransactionBlockResponse) {
   const mandateType = `${PACKAGE_ID}::mandate::Mandate`;
+  const assetMandateType = `${PACKAGE_ID}::mandate::AssetMandate<`;
   const created = result.objectChanges?.find(
     (change) =>
       change.type === "created" &&
       "objectType" in change &&
-      change.objectType.includes(mandateType),
+      (change.objectType.includes(mandateType) ||
+        change.objectType.includes(assetMandateType)),
   );
 
   if (created && "objectId" in created) {
@@ -182,9 +171,8 @@ export function CreateMandateDialog({
   );
 
   const [label, setLabel] = React.useState("");
-  const [agentAddress, setAgentAddress] = React.useState(
-    BACKEND_AGENT_ADDRESS,
-  );
+  const [agentAddress, setAgentAddress] = React.useState(BACKEND_AGENT_ADDRESS);
+  const [spendAsset, setSpendAsset] = React.useState<SpendAsset>("SUI");
   const [budgetSui, setBudgetSui] = React.useState("0.1");
   const [txLimitSui, setTxLimitSui] = React.useState("0.01");
   const [ttlMs, setTtlMs] = React.useState(EXPIRATION_OPTIONS[2].value);
@@ -264,6 +252,7 @@ export function CreateMandateDialog({
   function reset() {
     setLabel("");
     setAgentAddress(BACKEND_AGENT_ADDRESS);
+    setSpendAsset("SUI");
     setBudgetSui("0.1");
     setTxLimitSui("0.01");
     setTtlMs(EXPIRATION_OPTIONS[2].value);
@@ -287,8 +276,38 @@ export function CreateMandateDialog({
     }
   }
 
-  const budgetIssue = getPositiveSuiAmountIssue(budgetSui, "Budget");
-  const txLimitIssue = getPositiveSuiAmountIssue(txLimitSui, "Max tx");
+  const selectedAssetLabel =
+    spendAsset === "SUI" ? "SUI vault" : "DeepBook USDC vault";
+  const selectedAssetDecimals = spendAsset === "SUI" ? 9 : DUSDC_DECIMALS;
+  const selectedAssetUnit = spendAsset === "SUI" ? "SUI" : "test USDC";
+  const budgetIssue = (() => {
+    try {
+      const units = parseDecimalToUnits(
+        budgetSui,
+        selectedAssetDecimals,
+        "Budget",
+      );
+      return units > BigInt(0) ? null : "Budget must be greater than 0";
+    } catch {
+      return `Budget must be a valid ${selectedAssetLabel} amount`;
+    }
+  })();
+  const txLimitIssue = (() => {
+    try {
+      const units = parseDecimalToUnits(
+        txLimitSui,
+        selectedAssetDecimals,
+        "Max tx",
+      );
+      return units > BigInt(0) ? null : "Max tx must be greater than 0";
+    } catch {
+      return `Max tx must be a valid ${selectedAssetLabel} amount`;
+    }
+  })();
+  const assetIssue =
+    spendAsset === "DUSDC"
+      ? `DeepBook USDC vault is disabled: ${TEST_USDC_VAULT_UNAVAILABLE_REASON}`
+      : null;
   const agentAddressIssue = !IS_BACKEND_AGENT_ADDRESS_CONFIGURED
     ? "Backend agent address is missing from NEXT_PUBLIC_BACKEND_AGENT_ADDRESS."
     : !agentAddress.trim()
@@ -311,6 +330,7 @@ export function CreateMandateDialog({
       : null,
     budgetIssue ? "invalid budget" : null,
     txLimitIssue ? "invalid max tx" : null,
+    assetIssue ? "asset config missing" : null,
     isSigning ? "submitting" : null,
   ].filter((reason): reason is string => Boolean(reason));
   const valid = disabledReasons.length === 0;
@@ -384,30 +404,71 @@ export function CreateMandateDialog({
         );
       }
 
-      const budgetCeilingMist = parseSuiToMist(budgetSui);
-      const maxSingleTxMist = parseSuiToMist(txLimitSui);
+      const budgetUnits = parseDecimalToUnits(
+        budgetSui,
+        selectedAssetDecimals,
+        "Budget",
+      );
+      const maxSingleTxUnits = parseDecimalToUnits(
+        txLimitSui,
+        selectedAssetDecimals,
+        "Max tx",
+      );
 
-      if (budgetCeilingMist <= BigInt(0) || maxSingleTxMist <= BigInt(0)) {
+      if (budgetUnits <= BigInt(0) || maxSingleTxUnits <= BigInt(0)) {
         throw new Error(
           "Budget and max single transaction must be greater than 0",
         );
       }
 
       const tx = new Transaction();
-      const [budgetCoin] = tx.splitCoins(tx.gas, [
-        tx.pure.u64(budgetCeilingMist),
-      ]);
-      tx.moveCall({
-        target: `${PACKAGE_ID}::mandate::create_mandate`,
-        arguments: [
-          tx.pure.address(agentAddress.trim()),
-          budgetCoin,
-          tx.pure.u64(maxSingleTxMist),
-          tx.pure.u8(PROTOCOL_SCOPE_DEEPBOOK),
-          tx.pure.u64(ttlMs),
-          tx.object(CLOCK_OBJECT_ID),
-        ],
-      });
+      let objectType = `${PACKAGE_ID}::mandate::Mandate`;
+      if (spendAsset === "SUI") {
+        const [budgetCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(budgetUnits)]);
+        tx.moveCall({
+          target: `${PACKAGE_ID}::mandate::create_mandate`,
+          arguments: [
+            tx.pure.address(agentAddress.trim()),
+            budgetCoin,
+            tx.pure.u64(maxSingleTxUnits),
+            tx.pure.u8(PROTOCOL_SCOPE_DEEPBOOK),
+            tx.pure.u64(ttlMs),
+            tx.object(CLOCK_OBJECT_ID),
+          ],
+        });
+      } else {
+        if (!DUSDC_COIN_TYPE) {
+          throw new Error(
+            "NEXT_PUBLIC_DBUSDC_COIN_TYPE / NEXT_PUBLIC_DUSDC_COIN_TYPE is not configured.",
+          );
+        }
+        const coins = await client.getCoins({
+          owner: account!.address,
+          coinType: DUSDC_COIN_TYPE,
+        });
+        const sourceCoin = coins.data.find(
+          (coin) => BigInt(coin.balance) >= budgetUnits,
+        );
+        if (!sourceCoin) {
+          throw new Error("No DeepBook USDC coin found in wallet.");
+        }
+        const [budgetCoin] = tx.splitCoins(tx.object(sourceCoin.coinObjectId), [
+          tx.pure.u64(budgetUnits),
+        ]);
+        tx.moveCall({
+          target: `${PACKAGE_ID}::mandate::create_mandate_with_coin`,
+          typeArguments: [DUSDC_COIN_TYPE],
+          arguments: [
+            tx.pure.address(agentAddress.trim()),
+            budgetCoin,
+            tx.pure.u64(maxSingleTxUnits),
+            tx.pure.u8(PROTOCOL_SCOPE_DEEPBOOK),
+            tx.pure.u64(ttlMs),
+            tx.object(CLOCK_OBJECT_ID),
+          ],
+        });
+        objectType = currentAssetMandateObjectType(DUSDC_COIN_TYPE);
+      }
 
       const result = await withSigningTimeout(
         signAndExecute.mutateAsync({ transaction: tx }),
@@ -432,15 +493,19 @@ export function CreateMandateDialog({
         agentId: AGENTS[0].id,
         ownerAddress: account?.address,
         agentAddress: agentAddress.trim(),
-        budget: Number(formatMistAsSui(budgetCeilingMist)),
-        txLimit: Number(formatMistAsSui(maxSingleTxMist)),
-        approvalThreshold: Number(formatMistAsSui(maxSingleTxMist)),
+        budget: Number(budgetSui),
+        txLimit: Number(txLimitSui),
+        approvalThreshold: Number(txLimitSui),
         protocols: ["DeepBook"],
         durationDays: selectedExpiration.durationDays,
         network,
         digest: result.digest,
         ttlMs,
         expiresLabel: selectedExpiration.label,
+        objectType,
+        spendAsset: selectedAssetLabel,
+        assetSymbol: selectedAssetLabel,
+        assetDecimals: selectedAssetDecimals,
       });
 
       setDigest(result.digest);
@@ -505,10 +570,42 @@ export function CreateMandateDialog({
 
             <div className="grid grid-cols-1 gap-4 border-t border-cyan-400/10 pt-4 sm:grid-cols-2">
               <Field>
+                <FieldLabel>Spend asset</FieldLabel>
+                <Select
+                  value={spendAsset}
+                  onValueChange={(value) => setSpendAsset(value as SpendAsset)}
+                >
+                  <SelectTrigger className="w-full border-cyan-400/15 bg-white/[0.03]">
+                    <span>{selectedAssetLabel}</span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectItem value="SUI">SUI vault</SelectItem>
+                      <SelectItem value="DUSDC" disabled>
+                        <span className="flex min-w-0 flex-col items-start">
+                          <span>DeepBook USDC vault</span>
+                          <span className="text-xs text-muted-foreground">
+                            {TEST_USDC_VAULT_UNAVAILABLE_REASON}
+                          </span>
+                        </span>
+                      </SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+                <FieldDescription>
+                  SUI vault is the current executable demo route. DeepBook USDC
+                  vault support is wired but disabled until testnet has a
+                  fillable pool.
+                </FieldDescription>
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 border-t border-cyan-400/10 pt-4 sm:grid-cols-2">
+              <Field>
                 <div className="flex items-center justify-between">
                   <FieldLabel>Budget ceiling</FieldLabel>
                   <span className="font-mono text-xs font-medium tabular-nums text-cyan-300">
-                    {budgetSui} SUI
+                    {budgetSui} {selectedAssetUnit}
                   </span>
                 </div>
                 <InputGroup>
@@ -519,7 +616,9 @@ export function CreateMandateDialog({
                     value={budgetSui}
                     onChange={(event) => setBudgetSui(event.target.value)}
                   />
-                  <InputGroupAddon align="inline-end">SUI</InputGroupAddon>
+                  <InputGroupAddon align="inline-end">
+                    {selectedAssetUnit}
+                  </InputGroupAddon>
                 </InputGroup>
               </Field>
 
@@ -536,7 +635,9 @@ export function CreateMandateDialog({
                     value={txLimitSui}
                     onChange={(event) => setTxLimitSui(event.target.value)}
                   />
-                  <InputGroupAddon align="inline-end">SUI</InputGroupAddon>
+                  <InputGroupAddon align="inline-end">
+                    {selectedAssetUnit}
+                  </InputGroupAddon>
                 </InputGroup>
               </Field>
             </div>
@@ -601,6 +702,12 @@ export function CreateMandateDialog({
             {account && (budgetIssue || txLimitIssue) && (
               <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {budgetIssue ?? txLimitIssue}
+              </div>
+            )}
+
+            {account && assetIssue && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {assetIssue}
               </div>
             )}
 
