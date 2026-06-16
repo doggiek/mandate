@@ -50,7 +50,8 @@ export const TRADING_ROUTES: TradingRoute[] = [
   {
     id: "deep_momentum_buy",
     label: "DEEP Momentum",
-    description: "Signal: DEEP/SUI quote. Action: Buy DEEP with SUI.",
+    description:
+      "Monitor DEEP/SUI quote and let the agent buy DEEP with capped SUI.",
     signal: {
       strategyId: "deep_sui_quote_momentum",
       source: "deepbook_quote",
@@ -77,7 +78,8 @@ export const TRADING_ROUTES: TradingRoute[] = [
   {
     id: "sui_momentum_buy",
     label: "SUI Momentum",
-    description: "Signal: SUI/USD price. Action: Buy SUI with test USDC.",
+    description:
+      "Disabled route: SUI/USD signal with future test USDC spend.",
     signal: {
       strategyId: "sui_price_momentum",
       source: "sui_price",

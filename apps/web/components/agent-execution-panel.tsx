@@ -1433,7 +1433,7 @@ export function AgentExecutionPanel() {
             "policy",
             `Policy passed: ${formatRouteAmount(amountSui, selectedTradingRoute?.action.spendAsset)} within max tx and budget.`,
           );
-          appendRuntimeLog("execute", "Submitting DeepBook PTB.");
+          appendRuntimeLog("execute", "Submitting DeepBook buy PTB.");
         } else {
           const reason = policyBlockedDetail(
             runStrategy,
@@ -1938,7 +1938,7 @@ export function AgentExecutionPanel() {
       <CardHeader className="border-b border-border">
         <CardTitle>Automation</CardTitle>
         <CardDescription>
-          Signal → Decision → Policy Gate → Agent Execution → On-chain Proof.
+          Signal → Policy Gate → DeepBook Buy → On-chain Proof.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4 p-4">
@@ -2099,8 +2099,7 @@ export function AgentExecutionPanel() {
           <div>
             <h3 className="text-sm font-semibold text-foreground">Strategy</h3>
             <p className="text-xs text-muted-foreground">
-              Signal Engine → Trigger Decision → Mandate Policy Gate → Backend
-              Agent Execution → On-chain Activity
+              Signal → Policy Gate → DeepBook Buy → On-chain Proof
             </p>
           </div>
 
@@ -2461,8 +2460,8 @@ export function AgentExecutionPanel() {
               Agent Console
             </h3>
             <p className="text-xs text-muted-foreground">
-              Local session trace for Signal → Decision → Policy Gate →
-              Execution.
+              Local session trace for Signal → Policy Gate → DeepBook Buy →
+              On-chain Proof.
             </p>
           </div>
 
