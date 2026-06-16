@@ -110,11 +110,18 @@ type SignalStatus = {
   strategyId: string
   signalType: "price_momentum" | "volatility" | "whale_flow" | "ai_signal"
   market: string
-  source: "mock" | "deepbook"
+  source: "mock" | "deepbook" | "deepbook_quote"
+  poolKey?: string
+  poolId?: string
+  inputAsset?: string
+  outputAsset?: string
+  inputAmount?: number
   baselineValue: number
   currentValue: number
+  residualSui?: number
   changePct: number
   thresholdPct: number
+  direction?: SignalDirection
   decision: "waiting" | "triggered"
   reason: string
   checkedAt: string
@@ -374,6 +381,25 @@ function signalDecisionClass(decision?: SignalStatus["decision"]) {
 
 function formatSignalValue(value?: number) {
   return typeof value === "number" ? value.toFixed(6) : "-"
+}
+
+function formatAmount(value: number) {
+  return value.toLocaleString("en-US", {
+    maximumFractionDigits: 9,
+    useGrouping: false,
+  })
+}
+
+function formatSignalQuote(signal: SignalStatus | null, value?: number) {
+  if (!signal || typeof value !== "number") {
+    return "-"
+  }
+
+  if (signal.inputAsset && signal.outputAsset && typeof signal.inputAmount === "number") {
+    return `${formatAmount(signal.inputAmount)} ${signal.inputAsset} -> ${formatAmount(value)} ${signal.outputAsset}`
+  }
+
+  return formatSignalValue(value)
 }
 
 function formatSignalChange(value?: number) {
@@ -1205,6 +1231,7 @@ export function AgentExecutionPanel() {
           strategyId: selectedSignalStrategy.id,
           thresholdPct: String(thresholdPct),
           direction: signalDirection,
+          amountSui: String(actionAmountSui || 1),
         })
         const forcedDecision = force ?? (forceSignalTriggered ? "triggered" : undefined)
         if (forcedDecision) {
@@ -1221,7 +1248,7 @@ export function AgentExecutionPanel() {
         setIsCheckingSignal(false)
       }
     },
-    [forceSignalTriggered, selectedSignalStrategy.id, signalDirection, thresholdPct]
+    [actionAmountSui, forceSignalTriggered, selectedSignalStrategy.id, signalDirection, thresholdPct]
   )
 
   const runAutoOnce = React.useCallback(async () => {
@@ -1585,7 +1612,7 @@ export function AgentExecutionPanel() {
               Trigger Conditions
             </h3>
             <p className="text-xs text-muted-foreground">
-              Demo signal source; replaceable with DeepBook quote or oracle feed.
+              Real DeepBook quote source; replaceable with oracle feed later.
             </p>
           </div>
 
@@ -1834,8 +1861,7 @@ export function AgentExecutionPanel() {
                 Live Signal status
               </h3>
               <p className="text-xs text-muted-foreground">
-                Demo signal source; replaceable with DeepBook quote or oracle
-                feed. Use
+                Real DeepBook quote source. Use
                 <span className="font-mono"> /api/agent/signal?force=triggered </span>
                 for demo triggering.
               </p>
@@ -1854,7 +1880,7 @@ export function AgentExecutionPanel() {
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             <SummaryChip
               label="Signal source"
-              value={liveSignal?.source ?? "mock"}
+              value={liveSignal?.source ?? "deepbook_quote"}
             />
             <SummaryChip
               label="Signal type"
@@ -1870,12 +1896,12 @@ export function AgentExecutionPanel() {
             />
             <SummaryChip
               label="Baseline"
-              value={formatSignalValue(liveSignal?.baselineValue)}
+              value={formatSignalQuote(liveSignal, liveSignal?.baselineValue)}
               mono
             />
             <SummaryChip
               label="Current"
-              value={formatSignalValue(liveSignal?.currentValue)}
+              value={formatSignalQuote(liveSignal, liveSignal?.currentValue)}
               mono
             />
             <SummaryChip
