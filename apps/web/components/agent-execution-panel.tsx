@@ -2,12 +2,11 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { AlertCircle, Play, RotateCcw } from "lucide-react"
+import { AlertCircle, Play, RotateCcw, Square } from "lucide-react"
 import { useCurrentAccount } from "@mysten/dapp-kit"
 
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -46,6 +45,26 @@ import {
 } from "@/lib/signal-strategies"
 import { tradingRouteByStrategyId } from "@/lib/trading-routes"
 import { cn } from "@/lib/utils"
+
+type RuntimeLogLevel =
+  | "info"
+  | "signal"
+  | "waiting"
+  | "triggered"
+  | "policy"
+  | "blocked"
+  | "execute"
+  | "filled"
+  | "no_fill"
+  | "failed"
+
+type RuntimeLogEntry = {
+  id: string
+  timestamp: number
+  level: RuntimeLogLevel
+  message: string
+  digest?: string
+}
 
 type AgentRunResult = {
   digest: string
@@ -90,11 +109,9 @@ type LastRunReceipt = {
 
 type AutoRunStatus = "off" | "running" | "stopped" | "error"
 type AutoRunInterval = "off" | "30000" | "60000" | "300000"
-type ExecutionMode = "test_only" | "auto_execute"
 type AutomationSessionState = {
   selectedMandateId: string | null
   autoInterval: AutoRunInterval
-  executionMode: ExecutionMode
   signalStrategyId: string
   signalDirection: SignalDirection
   signalThresholdPct: string
@@ -159,19 +176,6 @@ const AUTO_RUN_INTERVALS: Array<{
   { label: "5m", value: "300000" },
 ]
 
-const SIGNAL_DIRECTIONS: Array<{ label: string; value: SignalDirection }> = [
-  { label: "Up", value: "up" },
-  { label: "Down", value: "down" },
-  { label: "Either", value: "either" },
-]
-
-const EXECUTION_ASSETS = [{ label: "SUI", value: "SUI" as const }]
-
-const EXECUTION_MODES: Array<{ label: string; value: ExecutionMode }> = [
-  { label: "Test only", value: "test_only" },
-  { label: "Auto execute", value: "auto_execute" },
-]
-
 function SummaryChip({
   label,
   value,
@@ -188,13 +192,40 @@ function SummaryChip({
       <span className="truncate text-xs text-muted-foreground">{label}</span>
       <div
         className={cn(
-          "mt-2 min-w-0 truncate text-sm font-medium text-foreground",
+          "mt-2 min-w-0 text-sm font-medium text-foreground",
           mono && "font-mono"
         )}
         title={title}
       >
         {value ?? "-"}
       </div>
+    </div>
+  )
+}
+
+function RunSetupField({
+  label,
+  value,
+  mono = false,
+  title,
+}: {
+  label: string
+  value: React.ReactNode
+  mono?: boolean
+  title?: string
+}) {
+  return (
+    <div className="grid grid-cols-[104px_minmax(0,1fr)] items-center gap-3 py-1.5">
+      <span className="truncate text-xs text-muted-foreground">{label}</span>
+      <span
+        className={cn(
+          "min-w-0 truncate text-[15px] font-medium text-foreground",
+          mono && "font-mono"
+        )}
+        title={title}
+      >
+        {value ?? "-"}
+      </span>
     </div>
   )
 }
@@ -215,6 +246,35 @@ function ResultStatusBadge({ status }: { status: AgentRunResult["status"] }) {
       {status}
     </Badge>
   )
+}
+
+function runtimeLogLevelClass(level: RuntimeLogLevel) {
+  if (level === "triggered" || level === "policy" || level === "filled") {
+    return "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+  }
+  if (level === "signal" || level === "execute") {
+    return "border-cyan-400/25 bg-cyan-400/10 text-cyan-300"
+  }
+  if (level === "blocked" || level === "no_fill") {
+    return "border-amber-500/25 bg-amber-500/10 text-amber-300"
+  }
+  if (level === "waiting") {
+    return "border-zinc-500/25 bg-zinc-500/10 text-zinc-300"
+  }
+  if (level === "failed") {
+    return "border-destructive/30 bg-destructive/10 text-destructive"
+  }
+  return "border-border bg-background/60 text-muted-foreground"
+}
+
+function displayAsset(asset?: string | null) {
+  if (!asset) {
+    return "-"
+  }
+  if (asset === "DBUSDC") {
+    return "DeepBook test USDC"
+  }
+  return asset
 }
 
 function mandateCreatedTime(mandate: { createdAt: string }) {
@@ -324,6 +384,54 @@ function strategyBlockedReason(reason?: string) {
   }
 }
 
+function policyBlockedReason(strategy: StrategyKey) {
+  if (strategy === "exceed_per_tx") {
+    return "exceeds per-tx cap"
+  }
+  if (strategy === "exceed_budget") {
+    return "exceeds remaining budget"
+  }
+  if (strategy === "revoked_expired") {
+    return "mandate inactive or expired"
+  }
+  return null
+}
+
+function comparisonDetail(amount: number, limit: number, ok: boolean) {
+  return `${formatSui(amount)} ${ok ? "<=" : ">"} ${formatSui(limit)}`
+}
+
+function policyBlockedDetail(
+  strategy: StrategyKey,
+  amount: number,
+  maxTx: number,
+  remainingBudget: number
+) {
+  if (strategy === "exceed_per_tx") {
+    return `${comparisonDetail(amount, maxTx, false)} max tx`
+  }
+  if (strategy === "exceed_budget") {
+    return `${comparisonDetail(amount, remainingBudget, false)} remaining budget`
+  }
+  if (strategy === "revoked_expired") {
+    return "mandate inactive or expired"
+  }
+  return "Move policy rejected the agent action"
+}
+
+function signalSourceLabel(signal: SignalStatus | null) {
+  if (!signal) {
+    return "signal"
+  }
+  if (signal.source === "deepbook_quote") {
+    return `${signal.market} quote`
+  }
+  if (signal.source === "sui_price") {
+    return `${signal.market} price`
+  }
+  return signal.market
+}
+
 function isStrategyDisabled(
   strategy: StrategyKey,
   mandate?: { status: "active" | "expired" | "revoked" }
@@ -375,13 +483,6 @@ function autoRunStatusClass(status: AutoRunStatus) {
   return "border-border bg-background/60 text-muted-foreground"
 }
 
-function signalDecisionClass(decision?: SignalStatus["decision"]) {
-  if (decision === "triggered") {
-    return "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
-  }
-  return "border-border bg-background/60 text-muted-foreground"
-}
-
 function formatSignalValue(value?: number) {
   return typeof value === "number" ? value.toFixed(6) : "-"
 }
@@ -416,23 +517,6 @@ function formatSignalChange(value?: number) {
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`
 }
 
-function formatSignalCheckedAt(value?: string) {
-  if (!value) {
-    return "-"
-  }
-
-  const timestamp = Date.parse(value)
-  if (!Number.isFinite(timestamp)) {
-    return "-"
-  }
-
-  return new Intl.DateTimeFormat("en", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(timestamp)
-}
-
 function formatAutoRunTime(timestampMs?: number | null) {
   if (!timestampMs) {
     return "-"
@@ -443,6 +527,46 @@ function formatAutoRunTime(timestampMs?: number | null) {
     minute: "2-digit",
     second: "2-digit",
   })
+}
+
+function formatRuntimeLogTime(timestampMs: number) {
+  return new Date(timestampMs).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  })
+}
+
+function runResultLogLevel(result: AgentRunResult): RuntimeLogLevel {
+  if (result.status === "BLOCKED") {
+    return "blocked"
+  }
+  if (result.status === "FAILED") {
+    return "failed"
+  }
+  if (result.fillStatus === "filled") {
+    return "filled"
+  }
+  if (result.fillStatus === "no_fill") {
+    return "no_fill"
+  }
+  return "info"
+}
+
+function runResultLogMessage(result: AgentRunResult, amountSui: number) {
+  if (result.status === "BLOCKED") {
+    return `Blocked: ${strategyBlockedReason(result.blockedReason)}`
+  }
+  if (result.status === "FAILED") {
+    return `Failed: ${result.error ?? "Agent execution failed"}`
+  }
+  if (result.fillStatus === "filled") {
+    return `Filled: ${formatSui(amountSui)} -> ${result.outputAmount ?? result.outputAsset ?? "output"}${result.residualSui ? `, residual ${result.residualSui}` : ""}`
+  }
+  if (result.fillStatus === "no_fill") {
+    return `No fill: ${formatSui(amountSui)} returned as residual.`
+  }
+  return `Execution completed: ${formatSui(amountSui)} submitted.`
 }
 
 function readJsonStorage<T>(key: string): T | null {
@@ -553,13 +677,8 @@ export function AgentExecutionPanel() {
   const [signalThresholdPct, setSignalThresholdPct] = React.useState(() =>
     String(defaultSignalStrategy().thresholdPct)
   )
-  const [executionMode, setExecutionMode] =
-    React.useState<ExecutionMode>("test_only")
   const [executionAmountSui, setExecutionAmountSui] = React.useState("0.001")
   const [executionAsset, setExecutionAsset] = React.useState<"SUI">("SUI")
-  const [forceSignalTriggered, setForceSignalTriggered] = React.useState(false)
-  const [liveSignal, setLiveSignal] = React.useState<SignalStatus | null>(null)
-  const [isCheckingSignal, setIsCheckingSignal] = React.useState(false)
   const [autoStatus, setAutoStatus] = React.useState<AutoRunStatus>("off")
   const [autoMessage, setAutoMessage] = React.useState<string | null>(null)
   const [autoRunCount, setAutoRunCount] = React.useState(0)
@@ -567,11 +686,13 @@ export function AgentExecutionPanel() {
   const [autoStartedAt, setAutoStartedAt] = React.useState<number | null>(null)
   const [autoLastDigest, setAutoLastDigest] = React.useState<string | null>(null)
   const [autoNextRunAt, setAutoNextRunAt] = React.useState<number | null>(null)
+  const [runtimeLog, setRuntimeLog] = React.useState<RuntimeLogEntry[]>([])
   const [nowMs, setNowMs] = React.useState(() => Date.now())
   const autoTimerRef = React.useRef<number | null>(null)
   const autoInFlightRef = React.useRef(false)
   const loadedScopeRef = React.useRef<string | null>(null)
   const skipNextPersistRef = React.useRef(false)
+  const loggedPageLoadedRef = React.useRef(false)
   const automationSessionIdRef = React.useRef(
     typeof crypto !== "undefined" && "randomUUID" in crypto
       ? crypto.randomUUID()
@@ -581,11 +702,34 @@ export function AgentExecutionPanel() {
     signalStrategyById(signalStrategyId) ?? defaultSignalStrategy()
   const selectedTradingRoute = tradingRouteByStrategyId(selectedSignalStrategy.id)
 
+  const appendRuntimeLog = React.useCallback(
+    (level: RuntimeLogLevel, message: string, digest?: string) => {
+      setRuntimeLog((entries) => [
+        {
+          id:
+            typeof crypto !== "undefined" && "randomUUID" in crypto
+              ? crypto.randomUUID()
+              : `${Date.now()}-${Math.random()}`,
+          timestamp: Date.now(),
+          level,
+          message,
+          digest,
+        },
+        ...entries,
+      ].slice(0, 10))
+    },
+    []
+  )
+
   React.useEffect(() => {
     setResult(lastRunReceipt.result)
     setError(lastRunReceipt.error)
     setRunContext(lastRunReceipt.context)
-  }, [])
+    if (!loggedPageLoadedRef.current) {
+      loggedPageLoadedRef.current = true
+      appendRuntimeLog("info", "Automation page loaded.")
+    }
+  }, [appendRuntimeLog])
 
   React.useEffect(() => {
     if (autoStatus !== "running") {
@@ -652,12 +796,17 @@ export function AgentExecutionPanel() {
           scopedStorageKey(AUTOMATION_SELECTED_MANDATE_PREFIX, ownerPackageScope)
         )
       : null
-    const savedSelection = selectableMandates.find(
+    const savedSelection = currentPackageActiveMandates.find(
       (mandate) => mandate.id === savedSelectedMandateId
     )
 
-    if (!stillPresent || (!belongsToCurrentPackage(currentSelection) && latest)) {
-      setSelectedMandateId(savedSelection?.id ?? latest?.id ?? null)
+    if (
+      !stillPresent ||
+      (latest &&
+        (!belongsToCurrentPackage(currentSelection) ||
+          currentSelection?.status !== "active"))
+    ) {
+      setSelectedMandateId(latest?.id ?? savedSelection?.id ?? null)
     }
   }, [
     currentPackageActiveMandates,
@@ -683,6 +832,7 @@ export function AgentExecutionPanel() {
       selectableMandates.find((mandate) => mandate.id === selectedMandateId),
     [selectableMandates, selectedMandateId]
   )
+
   const selectedMandateActivity = React.useMemo(() => {
     if (!selectedMandate?.id) {
       return []
@@ -690,7 +840,7 @@ export function AgentExecutionPanel() {
 
     return sortActivitiesByTimeDesc(
       activity.filter((event) => event.mandateId === selectedMandate.id)
-    ).slice(0, 5)
+    ).slice(0, 3)
   }, [activity, selectedMandate?.id])
   const automationScope = React.useMemo(() => {
     const ownerAddress = account?.address
@@ -749,12 +899,21 @@ export function AgentExecutionPanel() {
         copyable: false,
       },
       {
-        label: "Created",
-        value: selectedMandate?.createdAtDisplay ?? "-",
+        label: "Spend asset",
+        value: selectedTradingRoute?.action.spendAsset === "SUI"
+          ? "SUI vault"
+          : selectedTradingRoute?.action.spendAsset
+            ? `${selectedTradingRoute.action.spendAsset} vault`
+            : "-",
+        copyable: false,
+      },
+      {
+        label: "Status",
+        value: selectedMandate?.status ?? "-",
         copyable: false,
       },
     ],
-    [selectedMandate]
+    [selectedMandate, selectedTradingRoute]
   )
   const selectedAgentAddress = selectedMandate?.agentAddress
   const selectedProtocol =
@@ -764,6 +923,11 @@ export function AgentExecutionPanel() {
     selectedAgentAddress?.toLowerCase() === BACKEND_AGENT_ADDRESS.toLowerCase()
   const protocolAllowed = selectedProtocol === "DeepBook"
   const packageAllowed = belongsToCurrentPackage(selectedMandate)
+  const routeExecutable = selectedTradingRoute?.action.executable === true
+  const mandateSpendAsset = "SUI"
+  const routeDisabledReason =
+    selectedTradingRoute?.action.unavailableReason ??
+    "Selected execution route is not connected yet."
   const remainingBudget = selectedMandate
     ? Math.max(selectedMandate.budget - selectedMandate.spent, 0)
     : 0
@@ -781,8 +945,16 @@ export function AgentExecutionPanel() {
       maxTx: Boolean(selectedMandate && actionAmountValid && actionAmountSui <= selectedMandate.txLimit),
       budget: Boolean(selectedMandate && actionAmountValid && actionAmountSui <= remainingBudget),
       active: selectedMandate?.status === "active",
+      spendAsset: selectedTradingRoute?.action.spendAsset === mandateSpendAsset,
     }),
-    [actionAmountSui, actionAmountValid, remainingBudget, selectedMandate]
+    [
+      actionAmountSui,
+      actionAmountValid,
+      mandateSpendAsset,
+      remainingBudget,
+      selectedMandate,
+      selectedTradingRoute,
+    ]
   )
   const validateRunStrategy = React.useCallback(
     (runStrategy: StrategyKey) => {
@@ -812,6 +984,13 @@ export function AgentExecutionPanel() {
         return {
           ok: false,
           reason: "Selected Mandate must be scoped to DeepBook.",
+        }
+      }
+
+      if (!routeExecutable) {
+        return {
+          ok: false,
+          reason: routeDisabledReason,
         }
       }
 
@@ -852,6 +1031,8 @@ export function AgentExecutionPanel() {
       protocolAllowed,
       remainingBudget,
       selectedMandate,
+      routeDisabledReason,
+      routeExecutable,
     ]
   )
   const canRunAgent = validateRunStrategy(policyStrategy).ok
@@ -861,11 +1042,43 @@ export function AgentExecutionPanel() {
   }, [signalThresholdPct])
   const thresholdValid = Number.isFinite(Number(signalThresholdPct)) && Number(signalThresholdPct) > 0
   const canStartAutoRun =
-    executionMode === "auto_execute" &&
     autoInterval !== "off" &&
     thresholdValid &&
     validateRunStrategy(policyStrategy).ok
+  const selectedAutoIntervalLabel =
+    AUTO_RUN_INTERVALS.find((option) => option.value === autoInterval)?.label ??
+    "Off"
   const showMandateLoading = loading && selectableMandates.length === 0 && !result
+  const showMandateLoadingState = loading && !selectedMandate
+  const showEmptyMandateWarning =
+    !loading && !selectedMandate && currentPackageActiveMandates.length === 0
+  const compactRunStatus = React.useMemo(() => {
+    if (isRunning) {
+      return "Executing"
+    }
+    if (autoStatus === "running") {
+      return autoMessage === "Executing" ? "Executing" : "Waiting for signal"
+    }
+    if (result?.status === "BLOCKED") {
+      return "Policy blocked"
+    }
+    if (result?.status === "SUCCESS") {
+      if (result.fillStatus === "filled") {
+        return "Filled"
+      }
+      if (result.fillStatus === "no_fill") {
+        return "No fill"
+      }
+      return "Signal triggered"
+    }
+    if (result?.status === "FAILED" || autoStatus === "error") {
+      return "Failed"
+    }
+    if (autoStatus === "stopped") {
+      return "Auto stopped"
+    }
+    return "Waiting for signal"
+  }, [autoMessage, autoStatus, isRunning, result])
 
   const clearRunResult = React.useCallback(() => {
     lastRunReceipt = {
@@ -892,7 +1105,6 @@ export function AgentExecutionPanel() {
     setAutoStartedAt(null)
     setAutoLastDigest(null)
     setAutoNextRunAt(null)
-    setLiveSignal(null)
     clearRunResult()
   }, [clearRunResult])
 
@@ -918,7 +1130,6 @@ export function AgentExecutionPanel() {
     }
 
     setAutoInterval(savedSession.autoInterval)
-    setExecutionMode(savedSession.executionMode)
     setSignalStrategyId(savedSession.signalStrategyId)
     setSignalDirection(savedSession.signalDirection)
     setSignalThresholdPct(savedSession.signalThresholdPct)
@@ -928,9 +1139,13 @@ export function AgentExecutionPanel() {
     if (savedSession.running) {
       releaseActiveAutomationLockForScope(automationScope)
       setAutoStatus("stopped")
-      setAutoMessage("Automation session interrupted. Click Start to resume.")
+      setAutoMessage("Automation session interrupted. Click Start Automation to resume.")
+      appendRuntimeLog(
+        "waiting",
+        "Automation session interrupted. Click Start Automation to resume."
+      )
     }
-  }, [automationScope, resetAutomationUi, selectedMandate?.id])
+  }, [appendRuntimeLog, automationScope, resetAutomationUi, selectedMandate?.id])
 
   React.useEffect(() => {
     if (!automationScope || loadedScopeRef.current !== automationScope) {
@@ -946,7 +1161,6 @@ export function AgentExecutionPanel() {
       {
         selectedMandateId: selectedMandate?.id ?? null,
         autoInterval,
-        executionMode,
         signalStrategyId,
         signalDirection,
         signalThresholdPct,
@@ -959,7 +1173,6 @@ export function AgentExecutionPanel() {
     autoInterval,
     autoStatus,
     automationScope,
-    executionMode,
     executionAmountSui,
     executionAsset,
     selectedMandate?.id,
@@ -979,8 +1192,11 @@ export function AgentExecutionPanel() {
       setAutoStatus(status)
       setAutoNextRunAt(null)
       setAutoMessage(message ?? null)
+      if (message) {
+        appendRuntimeLog(status === "error" ? "failed" : "info", message)
+      }
     },
-    []
+    [appendRuntimeLog]
   )
 
   React.useEffect(() => {
@@ -994,12 +1210,6 @@ export function AgentExecutionPanel() {
     }
   }, [autoStatus, policyStrategy, stopAutoRun, validateRunStrategy])
 
-  React.useEffect(() => {
-    if (autoStatus === "running" && executionMode !== "auto_execute") {
-      stopAutoRun("stopped", "Automation stopped after switching to Test only mode.")
-    }
-  }, [autoStatus, executionMode, stopAutoRun])
-
   const handleMandateChange = React.useCallback(
     (value: string | null) => {
       if (!value || value === selectedMandateId) {
@@ -1011,13 +1221,31 @@ export function AgentExecutionPanel() {
       }
       setSelectedMandateId(value)
       clearRunResult()
+      const nextMandate = selectableMandates.find((mandate) => mandate.id === value)
+      if (nextMandate) {
+        appendRuntimeLog(
+          "info",
+          `Mandate selected: ${nextMandate.label} (${shortId(nextMandate.id)}).`
+        )
+      }
     },
-    [autoStatus, clearRunResult, selectedMandateId, stopAutoRun]
+    [
+      appendRuntimeLog,
+      autoStatus,
+      clearRunResult,
+      selectableMandates,
+      selectedMandateId,
+      stopAutoRun,
+    ]
   )
 
   const handleSignalStrategyChange = React.useCallback((value: string) => {
+    if (autoStatus === "running") {
+      appendRuntimeLog("info", "Stop Automation before changing strategy.")
+      return
+    }
     const nextStrategy = signalStrategyById(value)
-    if (!nextStrategy || nextStrategy.status !== "available") {
+    if (!nextStrategy) {
       return
     }
 
@@ -1025,15 +1253,23 @@ export function AgentExecutionPanel() {
     setSignalDirection(nextStrategy.direction)
     setSignalThresholdPct(String(nextStrategy.thresholdPct))
     setExecutionAmountSui(String(nextStrategy.executionAmountSui || 0.001))
-    setLiveSignal(null)
-  }, [])
+    clearRunResult()
+    appendRuntimeLog(
+      "info",
+      `Strategy selected: ${nextStrategy.name} using ${nextStrategy.source}.`
+    )
+  }, [appendRuntimeLog, autoStatus, clearRunResult])
 
   const handleExecutionAmountChange = React.useCallback(
     (value: string) => {
+      if (autoStatus === "running") {
+        appendRuntimeLog("info", "Stop Automation before changing execution amount.")
+        return
+      }
       setExecutionAmountSui(value)
       clearRunResult()
     },
-    [clearRunResult]
+    [appendRuntimeLog, autoStatus, clearRunResult]
   )
 
   const scheduleRefresh = React.useCallback(() => {
@@ -1085,6 +1321,7 @@ export function AgentExecutionPanel() {
         }
         setError(failedResult.error ?? null)
         setResult(failedResult)
+        appendRuntimeLog("failed", failedResult.error ?? "Agent execution failed")
         lastRunReceipt = {
           result: failedResult,
           error: failedResult.error ?? null,
@@ -1098,6 +1335,25 @@ export function AgentExecutionPanel() {
       }
 
       try {
+        if (runStrategy === "normal") {
+          appendRuntimeLog(
+            "policy",
+            `Policy passed: ${formatSui(amountSui)} within max tx and budget.`
+          )
+          appendRuntimeLog("execute", "Submitting DeepBook PTB.")
+        } else {
+          const reason = policyBlockedDetail(
+            runStrategy,
+            amountSui,
+            selectedMandate.txLimit,
+            remainingBudget
+          )
+          appendRuntimeLog(
+            "blocked",
+            `Policy blocked: ${reason}.`
+          )
+          appendRuntimeLog("execute", "Recording on-chain blocked event.")
+        }
         const response = await fetch("/api/agent/run", {
           method: "POST",
           headers: {
@@ -1132,6 +1388,13 @@ export function AgentExecutionPanel() {
         if (payload.status === "BLOCKED") {
           const reason =
             payload.blockedReason ?? "Move policy rejected the agent action"
+          appendRuntimeLog(
+            "blocked",
+            payload.digest
+              ? `Blocked event recorded: ${shortId(payload.digest)}`
+              : `Blocked: ${strategyBlockedReason(reason)}`,
+            payload.digest
+          )
           recordBlockedAction({
             mandateId: selectedMandate.id,
             digest: payload.digest,
@@ -1154,6 +1417,7 @@ export function AgentExecutionPanel() {
                 : payload.error ?? "Agent execution failed"
             )
           setError(normalizedError)
+          appendRuntimeLog("failed", normalizedError, payload.digest)
           lastRunReceipt = {
             result: payload,
             error: normalizedError,
@@ -1166,6 +1430,11 @@ export function AgentExecutionPanel() {
           }
         }
 
+        appendRuntimeLog(
+          runResultLogLevel(payload),
+          runResultLogMessage(payload, amountSui),
+          payload.digest
+        )
         recordAgentExecution({
           mandateId: selectedMandate.id,
           digest: payload.digest,
@@ -1203,6 +1472,7 @@ export function AgentExecutionPanel() {
         }
         setError(normalizedError)
         setResult(failedResult)
+        appendRuntimeLog("failed", normalizedError)
         lastRunReceipt = {
           result: failedResult,
           error: normalizedError,
@@ -1221,6 +1491,7 @@ export function AgentExecutionPanel() {
       account?.address,
       recordAgentExecution,
       recordBlockedAction,
+      appendRuntimeLog,
       remainingBudget,
       scheduleRefresh,
       selectedMandate,
@@ -1232,40 +1503,47 @@ export function AgentExecutionPanel() {
   )
 
   const runAgent = React.useCallback(() => {
+    appendRuntimeLog("info", "Test Agent clicked.")
     void executeAgentRun(policyStrategy)
-  }, [executeAgentRun, policyStrategy])
+  }, [appendRuntimeLog, executeAgentRun, policyStrategy])
 
   const checkSignal = React.useCallback(
     async (force?: "triggered") => {
-      setIsCheckingSignal(true)
-      try {
-        const params = new URLSearchParams({
-          strategyId: selectedSignalStrategy.id,
-          source: selectedSignalStrategy.source,
-          thresholdPct: String(thresholdPct),
-          direction: signalDirection,
-          amountSui: String(actionAmountSui || 1),
-        })
-        const forcedDecision = force ?? (forceSignalTriggered ? "triggered" : undefined)
-        if (forcedDecision) {
-          params.set("force", forcedDecision)
-        }
-        const response = await fetch(`/api/agent/signal?${params.toString()}`)
-        if (!response.ok) {
-          throw new Error("Unable to read market signal")
-        }
-        const signal = (await response.json()) as SignalStatus
-        setLiveSignal(signal)
-        return signal
-      } finally {
-        setIsCheckingSignal(false)
+      appendRuntimeLog(
+        "signal",
+        `Checking ${selectedSignalStrategy.market} via ${selectedSignalStrategy.source}.`
+      )
+      const params = new URLSearchParams({
+        strategyId: selectedSignalStrategy.id,
+        source: selectedSignalStrategy.source,
+        thresholdPct: String(thresholdPct),
+        direction: signalDirection,
+        amountSui: String(actionAmountSui || 1),
+      })
+      if (force) {
+        params.set("force", force)
       }
+      const response = await fetch(`/api/agent/signal?${params.toString()}`)
+      if (!response.ok) {
+        throw new Error("Unable to read market signal")
+      }
+      const signal = (await response.json()) as SignalStatus
+      const currentQuote = formatSignalQuote(signal, signal.currentValue)
+      appendRuntimeLog(
+        signal.decision === "triggered" ? "triggered" : "waiting",
+        signal.decision === "triggered"
+          ? `${signalSourceLabel(signal)} moved ${formatSignalChange(signal.changePct)}, threshold ${signal.thresholdPct}% reached.`
+          : `${signalSourceLabel(signal)} checked: ${currentQuote}. Change ${formatSignalChange(signal.changePct)} is below threshold ${signal.thresholdPct}%. Next check ${selectedAutoIntervalLabel === "Off" ? "-" : selectedAutoIntervalLabel}.`
+      )
+      return signal
     },
     [
       actionAmountSui,
-      forceSignalTriggered,
+      appendRuntimeLog,
+      selectedSignalStrategy.market,
       selectedSignalStrategy.id,
       selectedSignalStrategy.source,
+      selectedAutoIntervalLabel,
       signalDirection,
       thresholdPct,
     ]
@@ -1278,6 +1556,7 @@ export function AgentExecutionPanel() {
 
     const validation = validateRunStrategy(policyStrategy)
     if (!validation.ok) {
+      appendRuntimeLog("blocked", validation.reason ?? "Policy blocked automation.")
       stopAutoRun("error", validation.reason ?? "Auto Run stopped.")
       return
     }
@@ -1298,7 +1577,7 @@ export function AgentExecutionPanel() {
 
     if (signal.decision !== "triggered") {
       autoInFlightRef.current = false
-      setAutoMessage(signal.reason)
+      setAutoMessage("Waiting for signal")
       return
     }
 
@@ -1308,7 +1587,7 @@ export function AgentExecutionPanel() {
       changePct: signal.changePct,
       decision: signal.decision,
     })
-    setAutoMessage("Signal triggered. Submitting backend agent execution.")
+    setAutoMessage("Executing")
     const outcome = await executeAgentRun(policyStrategy)
     autoInFlightRef.current = false
 
@@ -1331,37 +1610,44 @@ export function AgentExecutionPanel() {
     }
 
     stopAutoRun("error", outcome.error ?? "Auto Run failed.")
-  }, [checkSignal, executeAgentRun, policyStrategy, stopAutoRun, validateRunStrategy])
+  }, [
+    appendRuntimeLog,
+    checkSignal,
+    executeAgentRun,
+    policyStrategy,
+    stopAutoRun,
+    validateRunStrategy,
+  ])
 
   const startAutoRun = React.useCallback(() => {
     const validation = validateRunStrategy(policyStrategy)
     if (autoStatus === "running") {
       setAutoMessage("Automation is already running in this browser session.")
-      return
-    }
-    if (executionMode !== "auto_execute") {
-      setAutoStatus("error")
-      setAutoMessage("Switch execution mode to Auto execute before starting Automation.")
+      appendRuntimeLog("info", "Automation is already running in this browser session.")
       return
     }
     if (autoInterval === "off") {
       setAutoStatus("error")
       setAutoMessage("Choose an interval before starting Auto Run.")
+      appendRuntimeLog("failed", "Choose an interval before starting Auto Run.")
       return
     }
     if (!thresholdValid) {
       setAutoStatus("error")
       setAutoMessage("Enter a positive signal threshold before starting Automation.")
+      appendRuntimeLog("failed", "Enter a positive signal threshold before starting Automation.")
       return
     }
     if (!validation.ok) {
       setAutoStatus("error")
       setAutoMessage(validation.reason ?? "Auto Run cannot start.")
+      appendRuntimeLog("blocked", validation.reason ?? "Auto Run cannot start.")
       return
     }
     if (!automationScope) {
       setAutoStatus("error")
       setAutoMessage("Select a mandate before starting Automation.")
+      appendRuntimeLog("failed", "Select a mandate before starting Automation.")
       return
     }
 
@@ -1372,6 +1658,7 @@ export function AgentExecutionPanel() {
     ) {
       setAutoStatus("error")
       setAutoMessage("Another automation session is already running in this browser.")
+      appendRuntimeLog("failed", "Another automation session is already running in this browser.")
       return
     }
     if (autoTimerRef.current) {
@@ -1386,6 +1673,10 @@ export function AgentExecutionPanel() {
       market: selectedSignalStrategy.market,
       threshold: thresholdPct,
     })
+    appendRuntimeLog(
+      "info",
+      `Start Automation clicked: monitoring ${selectedSignalStrategy.market} via ${selectedSignalStrategy.source}.`
+    )
     setAutoStatus("running")
     setAutoMessage(null)
     setAutoStartedAt(Date.now())
@@ -1393,14 +1684,51 @@ export function AgentExecutionPanel() {
     setAutoCheckCount(0)
     setAutoLastDigest(null)
     setAutoNextRunAt(null)
+
+    if (policyStrategy !== "normal") {
+      const reason = selectedMandate
+        ? policyBlockedDetail(
+            policyStrategy,
+            actionAmountSui,
+            selectedMandate.txLimit,
+            remainingBudget
+          )
+        : policyBlockedReason(policyStrategy)
+      appendRuntimeLog(
+        "blocked",
+        `Policy preview blocked: ${reason ?? "Move policy rejected the agent action"}.`
+      )
+      appendRuntimeLog(
+        "execute",
+        "Recording one on-chain blocked event."
+      )
+      void executeAgentRun(policyStrategy).then((outcome) => {
+        if (outcome.result?.digest) {
+          setAutoLastDigest(outcome.result.digest)
+        }
+        setAutoRunCount((count) => count + 1)
+        stopAutoRun(
+          outcome.result?.status === "BLOCKED" ? "stopped" : "error",
+          outcome.result?.status === "BLOCKED"
+            ? "Auto Run stopped."
+            : outcome.error ?? "Auto Run failed."
+        )
+      })
+      return
+    }
+
     void runAutoOnce()
   }, [
     autoInterval,
     autoStatus,
     automationScope,
-    executionMode,
+    appendRuntimeLog,
+    actionAmountSui,
+    executeAgentRun,
     policyStrategy,
+    remainingBudget,
     runAutoOnce,
+    selectedMandate,
     selectedSignalStrategy.id,
     selectedSignalStrategy.market,
     selectedSignalStrategy.source,
@@ -1435,43 +1763,54 @@ export function AgentExecutionPanel() {
   }, [autoCheckCount, autoInterval, autoStatus, runAutoOnce])
 
   const autoRunValidation = validateRunStrategy(policyStrategy)
-  const selectedAutoIntervalLabel =
-    AUTO_RUN_INTERVALS.find((option) => option.value === autoInterval)?.label ??
-    "Off"
+  const policyGateItems = [
+    {
+      label: "Within max tx",
+      ok: policyChecks.maxTx,
+      detail: selectedMandate
+        ? comparisonDetail(actionAmountSui, selectedMandate.txLimit, policyChecks.maxTx)
+        : "-",
+    },
+    {
+      label: "Within budget",
+      ok: policyChecks.budget,
+      detail: selectedMandate
+        ? comparisonDetail(actionAmountSui, remainingBudget, policyChecks.budget)
+        : "-",
+    },
+    {
+      label: "Mandate active",
+      ok: policyChecks.active,
+      detail: selectedMandate ? selectedMandate.status : "-",
+    },
+    {
+      label: "Spend asset matches vault",
+      ok: policyChecks.spendAsset,
+      detail:
+        selectedTradingRoute?.action.spendAsset === mandateSpendAsset
+          ? "SUI vault"
+          : `${displayAsset(selectedTradingRoute?.action.spendAsset)} route`,
+    },
+  ]
 
   return (
     <Card className="border-primary/15 bg-card/80">
       <CardHeader className="border-b border-border">
         <CardTitle>Automation</CardTitle>
         <CardDescription>
-          Signal, action amount, and Mandate policy determine whether the
-          backend Trading Agent executes.
+          Signal → Decision → Policy Gate → Agent Execution → On-chain Proof.
         </CardDescription>
-        <CardAction>
-          <Button
-            onClick={runAgent}
-            disabled={isRunning || autoStatus === "running" || !canRunAgent}
-            className="bg-primary text-primary-foreground hover:bg-primary/90"
-          >
-            {isRunning ? (
-              <RotateCcw data-icon="inline-start" className="animate-spin" />
-            ) : (
-              <Play data-icon="inline-start" />
-            )}
-            {isRunning ? "Testing" : "Test Run"}
-          </Button>
-        </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-4 p-4">
-        {/* Natural language planning is out of scope for MVP; this panel executes a configured DeepBook action. */}
-        <p className="text-xs text-muted-foreground">
-          Owner signs only to create or revoke a Mandate; execution is submitted
-          by the backend Trading Agent within the on-chain policy limits.
-        </p>
         <section className="flex flex-col gap-3">
-          <h3 className="text-sm font-semibold text-foreground">
-            Select Mandate
-          </h3>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">
+              Mandate Policy
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Owner signs only to create or revoke a Mandate. The backend Trading Agent executes within these on-chain limits.
+            </p>
+          </div>
           {showMandateLoading ? (
             <div className="rounded-lg border border-border bg-background/60 p-3">
               <Skeleton className="h-9 w-full" />
@@ -1531,13 +1870,13 @@ export function AgentExecutionPanel() {
           )}
 
           {showMandateLoading ? (
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-              {Array.from({ length: 6 }).map((_, index) => (
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
+              {Array.from({ length: 7 }).map((_, index) => (
                 <Skeleton key={index} className="h-[58px] rounded-lg" />
               ))}
             </div>
           ) : selectedMandate && (
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
               {mandateSummary.map((item) => (
                 <SummaryChip
                   key={item.label}
@@ -1570,12 +1909,22 @@ export function AgentExecutionPanel() {
           )}
         </section>
 
-        {!selectedMandate && (
+        {showMandateLoadingState && (
+          <Alert className="border-border bg-background/50">
+            <RotateCcw className="size-4 animate-spin text-muted-foreground" />
+            <AlertTitle>Loading mandates...</AlertTitle>
+            <AlertDescription>
+              Fetching current owner and package scoped Mandates before enabling automation.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {showEmptyMandateWarning && (
           <Alert className="border-amber-500/25 bg-amber-500/10">
             <AlertCircle className="size-4 text-amber-400" />
             <AlertTitle>Create an active mandate before running the agent.</AlertTitle>
             <AlertDescription>
-              Test Run needs an active shared Mandate object from the current
+              Test Agent needs an active shared Mandate object from the current
               wallet so the backend PTB can authorize spend against the right id.
             </AlertDescription>
           </Alert>
@@ -1584,7 +1933,7 @@ export function AgentExecutionPanel() {
         <section className="flex flex-col gap-3 rounded-lg border border-border bg-background/45 p-3">
           <div>
             <h3 className="text-sm font-semibold text-foreground">
-              Signal Strategy
+              Strategy
             </h3>
             <p className="text-xs text-muted-foreground">
               Signal Engine → Trigger Decision → Mandate Policy Gate → Backend
@@ -1595,19 +1944,27 @@ export function AgentExecutionPanel() {
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {SIGNAL_STRATEGIES.map((option) => {
               const selected = option.id === selectedSignalStrategy.id
-              const available = option.status === "available"
+              const route = tradingRouteByStrategyId(option.id)
+              const available = route?.action.executable === true
+              const selectable = Boolean(route) || option.status === "available"
+              const disabledRoute = Boolean(route && !route.action.executable)
+              const statusLabel = available
+                ? "Available"
+                : disabledRoute
+                  ? "Disabled"
+                  : "Coming soon"
 
               return (
                 <button
                   key={option.id}
                   type="button"
-                  disabled={!available}
+                  disabled={!selectable || autoStatus === "running"}
                   onClick={() => handleSignalStrategyChange(option.id)}
                   className={cn(
-                    "flex min-h-[132px] flex-col items-start gap-2 rounded-lg border bg-background/60 p-3 text-left transition",
-                    available &&
+                    "flex min-h-[168px] flex-col items-start gap-2 rounded-lg border bg-background/60 p-3 text-left transition",
+                    selectable &&
                       "hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
-                    !available &&
+                    (!selectable || autoStatus === "running") &&
                       "cursor-not-allowed opacity-55 hover:border-border hover:bg-background/60",
                     selected
                       ? "border-cyan-400/50 bg-cyan-400/10 shadow-[0_0_24px_rgba(34,211,238,0.08)]"
@@ -1624,17 +1981,33 @@ export function AgentExecutionPanel() {
                         "shrink-0 text-[11px]",
                         available
                           ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
+                          : disabledRoute
+                            ? "border-amber-500/25 bg-amber-500/10 text-amber-400"
                           : "border-border text-muted-foreground"
                       )}
                     >
-                      {available ? "Available" : "Coming soon"}
+                      {statusLabel}
                     </Badge>
                   </div>
-                  <span className="text-xs leading-snug text-muted-foreground">
-                    {option.description}
-                  </span>
+                  {route ? (
+                    <>
+                      <span className="text-xs leading-snug text-muted-foreground">
+                        Signal: {route.signal.market} · {route.signal.source}
+                      </span>
+                      <span className="text-xs leading-snug text-muted-foreground">
+                        Action: Buy {displayAsset(route.action.buyAsset)} with {displayAsset(route.action.spendAsset)}
+                      </span>
+                      <span className="text-xs leading-snug text-muted-foreground">
+                        Route: {route.action.poolKey}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-xs leading-snug text-muted-foreground">
+                      {option.description}
+                    </span>
+                  )}
                   <span className="mt-auto text-xs text-muted-foreground">
-                    {option.actionLabel}
+                    {route?.action.unavailableReason ?? (route ? option.description : "Coming soon")}
                   </span>
                 </button>
               )
@@ -1643,341 +2016,13 @@ export function AgentExecutionPanel() {
         </section>
 
         <section className="flex flex-col gap-3 rounded-lg border border-border bg-background/45 p-3">
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">
-              Trigger Conditions
-            </h3>
-            <p className="text-xs text-muted-foreground">
-              Select a signal source, then configure the trigger threshold.
-            </p>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            <SummaryChip label="Market" value={selectedSignalStrategy.market} mono />
-            <SummaryChip
-              label="Signal type"
-              value={selectedSignalStrategy.signalType.replaceAll("_", " ")}
-            />
-            <SummaryChip
-              label="Action"
-              value={selectedSignalStrategy.actionLabel}
-            />
-            <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
-              <span className="text-xs text-muted-foreground">Direction</span>
-              <Select
-                value={signalDirection}
-                onValueChange={(value) => setSignalDirection(value as SignalDirection)}
-              >
-                <SelectTrigger className="mt-2 h-8 w-full bg-background/70">
-                  <span className="truncate text-left text-sm">
-                    {
-                      SIGNAL_DIRECTIONS.find(
-                        (option) => option.value === signalDirection
-                      )?.label
-                    }
-                  </span>
-                </SelectTrigger>
-                <SelectContent align="start">
-                  <SelectGroup>
-                    {SIGNAL_DIRECTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
-              <span className="text-xs text-muted-foreground">Threshold</span>
-              <div className="mt-2 flex items-center gap-2">
-                <Input
-                  type="number"
-                  min="0.1"
-                  step="0.1"
-                  value={signalThresholdPct}
-                  onChange={(event) => setSignalThresholdPct(event.target.value)}
-                  className="h-8 bg-background/70"
-                />
-                <span className="text-xs text-muted-foreground">%</span>
-              </div>
-            </div>
-            <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
-              <span className="text-xs text-muted-foreground">Check interval</span>
-              <Select
-                value={autoInterval}
-                onValueChange={(value) => {
-                  if (autoStatus === "running") {
-                    stopAutoRun("stopped", "Automation stopped after interval change.")
-                  }
-                  setAutoInterval(value as AutoRunInterval)
-                }}
-              >
-                <SelectTrigger className="mt-2 h-8 w-full bg-background/70">
-                  <span className="truncate text-left text-sm">
-                    {selectedAutoIntervalLabel}
-                  </span>
-                </SelectTrigger>
-                <SelectContent align="start">
-                  <SelectGroup>
-                    {AUTO_RUN_INTERVALS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
-              <span className="text-xs text-muted-foreground">Execution mode</span>
-              <Select
-                value={executionMode}
-                onValueChange={(value) => setExecutionMode(value as ExecutionMode)}
-              >
-                <SelectTrigger className="mt-2 h-8 w-full bg-background/70">
-                  <span className="truncate text-left text-sm">
-                    {
-                      EXECUTION_MODES.find(
-                        (option) => option.value === executionMode
-                      )?.label
-                    }
-                  </span>
-                </SelectTrigger>
-                <SelectContent align="start">
-                  <SelectGroup>
-                    {EXECUTION_MODES.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
-              <span className="text-xs text-muted-foreground">
-                Demo force
-              </span>
-              <Button
-                type="button"
-                variant={forceSignalTriggered ? "default" : "outline"}
-                onClick={() => setForceSignalTriggered((value) => !value)}
-                className="mt-2 h-8 justify-start"
-              >
-                {forceSignalTriggered ? "force=triggered" : "Off"}
-              </Button>
-            </div>
-          </div>
-        </section>
-
-        <section className="flex flex-col gap-3 rounded-lg border border-border bg-background/45 p-3">
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">
-              Execution Action
-            </h3>
-            <p className="text-xs text-muted-foreground">
-              This action amount is passed to Test Run and Auto Execute.
-            </p>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
-              <span className="text-xs text-muted-foreground">
-                Execution Amount
-              </span>
-              <div className="mt-2 flex items-center gap-2">
-                <Input
-                  type="number"
-                  min="0.000001"
-                  step="0.001"
-                  value={executionAmountSui}
-                  onChange={(event) =>
-                    handleExecutionAmountChange(event.target.value)
-                  }
-                  className="h-8 bg-background/70 font-mono"
-                />
-                <span className="text-xs text-muted-foreground">
-                  {selectedTradingRoute?.action.spendAsset ?? executionAsset}
-                </span>
-              </div>
-            </div>
-            <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
-              <span className="text-xs text-muted-foreground">Spend asset</span>
-              <span className="mt-2 truncate text-sm font-medium text-foreground">
-                {selectedTradingRoute?.action.spendAsset ?? executionAsset}
-              </span>
-            </div>
-            <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
-              <span className="text-xs text-muted-foreground">Buy asset</span>
-              <span className="mt-2 truncate text-sm font-medium text-foreground">
-                {selectedTradingRoute?.action.buyAsset ?? "DEEP"}
-              </span>
-            </div>
-            <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
-              <span className="text-xs text-muted-foreground">Route / Pool</span>
-              <span
-                className="mt-2 truncate font-mono text-sm text-foreground"
-                title={selectedTradingRoute?.action.poolId}
-              >
-                {selectedTradingRoute?.action.poolKey ?? DEEPBOOK_POOL_KEY}
-              </span>
-            </div>
-          </div>
-        </section>
-
-        <section className="flex flex-col gap-3 rounded-lg border border-border bg-background/45 p-3">
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">
-              Policy Preview
-            </h3>
-            <p className="text-xs text-muted-foreground">
-              The Mandate policy gate is evaluated before DeepBook execution.
-            </p>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-4">
-            {[
-              {
-                label: "Within max tx",
-                ok: policyChecks.maxTx,
-                detail: selectedMandate
-                  ? `${formatSui(actionAmountSui)} <= ${formatSui(selectedMandate.txLimit)}`
-                  : "-",
-              },
-              {
-                label: "Within budget",
-                ok: policyChecks.budget,
-                detail: selectedMandate
-                  ? `${formatSui(actionAmountSui)} <= ${formatSui(remainingBudget)}`
-                  : "-",
-              },
-              {
-                label: "Mandate active",
-                ok: policyChecks.active,
-                detail: selectedMandate
-                  ? selectedMandate.status
-                  : "-",
-              },
-              {
-                label: "Spend asset type",
-                ok: selectedTradingRoute?.action.executable !== false,
-                detail:
-                  selectedTradingRoute?.action.spendAsset === "SUI"
-                    ? "SUI vault"
-                    : selectedTradingRoute?.action.executable
-                      ? "Generic vault route"
-                      : selectedTradingRoute?.action.unavailableReason ?? "Route unavailable",
-              },
-            ].map((item) => (
-              <div
-                key={item.label}
-                className={cn(
-                  "flex min-h-[58px] items-center gap-3 rounded-lg border bg-background/60 px-3 py-2",
-                  item.ok
-                    ? "border-emerald-500/20"
-                    : "border-amber-500/25 bg-amber-500/5"
-                )}
-              >
-                <span
-                  className={cn(
-                    "grid size-5 shrink-0 place-items-center rounded-full text-xs",
-                    item.ok
-                      ? "bg-emerald-500/15 text-emerald-400"
-                      : "bg-amber-500/15 text-amber-400"
-                  )}
-                >
-                  {item.ok ? "✓" : "!"}
-                </span>
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-medium text-foreground">
-                    {item.label}
-                  </span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {item.detail}
-                  </span>
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="flex flex-col gap-3 rounded-lg border border-border bg-background/45 p-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-semibold text-foreground">
-                Live Signal status
-              </h3>
-              <p className="text-xs text-muted-foreground">
-                Live signal source. Use
-                <span className="font-mono"> /api/agent/signal?force=triggered </span>
-                for demo triggering.
-              </p>
-            </div>
-            <Badge
-              variant="outline"
-              className={cn("w-fit font-medium", signalDecisionClass(liveSignal?.decision))}
-            >
-              {isCheckingSignal
-                ? "Checking"
-                : liveSignal?.decision
-                  ? liveSignal.decision
-                  : "waiting"}
-            </Badge>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            <SummaryChip
-              label="Signal source"
-              value={liveSignal?.source ?? selectedSignalStrategy.source}
-            />
-            <SummaryChip
-              label="Signal type"
-              value={
-                liveSignal?.signalType.replaceAll("_", " ") ??
-                selectedSignalStrategy.signalType.replaceAll("_", " ")
-              }
-            />
-            <SummaryChip
-              label="Market"
-              value={liveSignal?.market ?? selectedSignalStrategy.market}
-              mono
-            />
-            <SummaryChip
-              label="Baseline"
-              value={formatSignalQuote(liveSignal, liveSignal?.baselineValue)}
-              mono
-            />
-            <SummaryChip
-              label="Current"
-              value={formatSignalQuote(liveSignal, liveSignal?.currentValue)}
-              mono
-            />
-            <SummaryChip
-              label="Change"
-              value={formatSignalChange(liveSignal?.changePct)}
-              mono
-            />
-            <SummaryChip
-              label="Decision"
-              value={liveSignal?.decision ?? "-"}
-            />
-            <SummaryChip
-              label="Last checked"
-              value={formatSignalCheckedAt(liveSignal?.checkedAt)}
-              mono
-            />
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {liveSignal?.reason ?? "No signal check has run yet."}
-          </p>
-        </section>
-
-        <section className="flex flex-col gap-3 rounded-lg border border-border bg-background/45 p-3">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h3 className="text-sm font-semibold text-foreground">Automation controls</h3>
+              <h3 className="text-sm font-semibold text-foreground">
+                Run Setup
+              </h3>
               <p className="text-xs text-muted-foreground">
-                Start signal polling. A transaction is submitted only when the
-                live signal decision is triggered.
+                Configure the trigger, action amount, and policy preview before a test run or automation start.
               </p>
             </div>
             <Badge
@@ -1988,37 +2033,198 @@ export function AgentExecutionPanel() {
             </Badge>
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
-            <div className="grid gap-2 sm:grid-cols-3">
-              <SummaryChip
-                label="Action"
-                value={formatSui(actionAmountSui)}
-                mono
-              />
-              <SummaryChip
-                label="Policy outcome"
-                value={
-                  policyStrategy === "normal"
-                    ? "Executable"
-                    : policyStrategy === "exceed_per_tx"
-                      ? "Blocked: max tx"
-                      : policyStrategy === "exceed_budget"
-                        ? "Blocked: budget"
-                        : "Blocked: inactive"
-                }
-              />
-              <SummaryChip label="Asset" value={executionAsset} />
+          <div className="grid gap-4 lg:grid-cols-3">
+            <div className="min-w-0 rounded-lg border border-border/60 bg-background/35 p-3">
+              <div className="text-xs font-medium text-muted-foreground">
+                Trigger
+              </div>
+              <div className="mt-3 space-y-2">
+                <RunSetupField
+                  label="Signal market"
+                  value={selectedTradingRoute?.signal.market ?? selectedSignalStrategy.market}
+                  mono
+                />
+                <div className="grid grid-cols-[104px_minmax(0,1fr)] items-center gap-3 py-1.5">
+                  <span className="truncate text-xs text-muted-foreground">Threshold</span>
+                  <div className="flex min-w-0 items-center gap-2">
+                  <Input
+                    type="number"
+                    min="0.1"
+                    step="0.1"
+                    value={signalThresholdPct}
+                    disabled={autoStatus === "running"}
+                    onChange={(event) => setSignalThresholdPct(event.target.value)}
+                    className="h-8 min-w-0 bg-background/70"
+                  />
+                  <span className="shrink-0 text-xs text-muted-foreground">%</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-[104px_minmax(0,1fr)] items-center gap-3 py-1.5">
+                  <span className="truncate text-xs text-muted-foreground">Check interval</span>
+                  <Select
+                    value={autoInterval}
+                    disabled={autoStatus === "running"}
+                    onValueChange={(value) => {
+                      if (autoStatus === "running") {
+                        stopAutoRun("stopped", "Automation stopped after interval change.")
+                      }
+                      setAutoInterval(value as AutoRunInterval)
+                    }}
+                  >
+                    <SelectTrigger className="h-8 w-full min-w-0 bg-background/70">
+                      <span className="truncate text-left text-sm">
+                        {selectedAutoIntervalLabel}
+                      </span>
+                    </SelectTrigger>
+                    <SelectContent align="start">
+                      <SelectGroup>
+                        {AUTO_RUN_INTERVALS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
             </div>
 
-            <div className="flex items-end gap-2">
+            <div className="min-w-0 rounded-lg border border-border/60 bg-background/35 p-3">
+              <div className="text-xs font-medium text-muted-foreground">
+                Action
+              </div>
+              <div className="mt-3 space-y-2">
+                <div className="grid grid-cols-[104px_minmax(0,1fr)] items-center gap-3 py-1.5">
+                  <span className="truncate text-xs text-muted-foreground">Amount</span>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Input
+                      type="number"
+                      min="0.000001"
+                      step="0.001"
+                      value={executionAmountSui}
+                      disabled={autoStatus === "running"}
+                      onChange={(event) =>
+                        handleExecutionAmountChange(event.target.value)
+                      }
+                      className="h-8 min-w-0 bg-background/70 font-mono"
+                    />
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {displayAsset(selectedTradingRoute?.action.spendAsset ?? executionAsset)}
+                    </span>
+                  </div>
+                </div>
+                <RunSetupField
+                  label="Buy asset"
+                  value={displayAsset(selectedTradingRoute?.action.buyAsset)}
+                />
+                <RunSetupField
+                  label="Route / Pool"
+                  value={selectedTradingRoute?.action.poolKey ?? "-"}
+                  mono
+                  title={selectedTradingRoute?.action.poolKey}
+                />
+              </div>
+            </div>
+
+            <div className="min-w-0 rounded-lg border border-border/60 bg-background/35 p-3">
+              <div className="text-xs font-medium text-muted-foreground">
+                Policy Preview
+              </div>
+              <div className="mt-3 space-y-1">
+                {policyGateItems.map((item) => (
+                  <div
+                    key={item.label}
+                    className="grid min-w-0 grid-cols-[20px_minmax(0,1fr)] items-start gap-2 py-1.5"
+                  >
+                    <span
+                      className={cn(
+                        "mt-0.5 grid size-4 shrink-0 place-items-center rounded-full text-[10px]",
+                        item.ok
+                          ? "bg-emerald-500/15 text-emerald-400"
+                          : "bg-amber-500/15 text-amber-400"
+                      )}
+                    >
+                      {item.ok ? "✓" : "!"}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium text-foreground">
+                        {item.label}
+                      </span>
+                      <span
+                        className="block min-w-0 truncate text-xs text-muted-foreground"
+                        title={item.detail}
+                      >
+                        {item.detail}
+                      </span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid items-center gap-3 lg:grid-cols-[1fr_auto]">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <SummaryChip
+                label="Status"
+                value={compactRunStatus}
+              />
+              <SummaryChip label="Run count" value={autoRunCount} mono />
+              <SummaryChip
+                label="Last execution"
+                value={
+                  autoLastDigest ? (
+                    <span className="inline-flex min-w-0 items-center gap-1">
+                      <CopyableId value={autoLastDigest} label="auto run digest" />
+                      <ExplorerLink digest={autoLastDigest} />
+                    </span>
+                  ) : (
+                    "-"
+                  )
+                }
+                mono={Boolean(autoLastDigest)}
+              />
+              <SummaryChip
+                label="Next check"
+                value={
+                  autoStatus === "running"
+                    ? formatCountdown(autoNextRunAt, nowMs)
+                    : autoInterval === "off"
+                      ? "-"
+                      : selectedAutoIntervalLabel
+                }
+                mono
+              />
+            </div>
+
+            <div className="flex flex-col justify-center gap-2 sm:flex-row lg:min-w-[280px]">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={runAgent}
+                disabled={isRunning || autoStatus === "running" || !canRunAgent}
+                className="h-9 w-full lg:w-auto"
+              >
+                {isRunning ? (
+                  <RotateCcw data-icon="inline-start" className="animate-spin" />
+                ) : (
+                  <Play data-icon="inline-start" />
+                )}
+                {isRunning ? "Testing" : "Test Agent"}
+              </Button>
               {autoStatus === "running" ? (
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => stopAutoRun("stopped", "Auto Run stopped by user.")}
+                  onClick={() => {
+                    appendRuntimeLog("info", "Stop Automation clicked.")
+                    stopAutoRun("stopped", "Auto Run stopped.")
+                  }}
                   className="h-9 w-full lg:w-auto"
                 >
-                  Stop
+                  <Square data-icon="inline-start" />
+                  Stop Automation
                 </Button>
               ) : (
                 <Button
@@ -2029,59 +2235,79 @@ export function AgentExecutionPanel() {
                   }
                   className="h-9 w-full bg-primary text-primary-foreground hover:bg-primary/90 lg:w-auto"
                 >
-                  Start
+                  <Play data-icon="inline-start" />
+                  Start Automation
                 </Button>
               )}
             </div>
           </div>
 
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            <SummaryChip
-              label="Started at"
-              value={
-                autoStatus === "running" && autoStartedAt
-                  ? formatAutoRunTime(autoStartedAt)
-                  : "-"
-              }
-              mono
-            />
-            <SummaryChip label="Run count" value={autoRunCount} mono />
-            <SummaryChip
-              label="Last execution"
-              value={
-                autoLastDigest ? (
-                  <span className="inline-flex min-w-0 items-center gap-1">
-                    <CopyableId value={autoLastDigest} label="auto run digest" />
-                    <ExplorerLink digest={autoLastDigest} />
-                  </span>
-                ) : (
-                  "-"
-                )
-              }
-              mono={Boolean(autoLastDigest)}
-            />
-            <SummaryChip
-              label="Next execution"
-              value={
-                autoStatus === "running"
-                  ? formatCountdown(autoNextRunAt, nowMs)
-                  : autoInterval === "off"
-                    ? "-"
-                    : selectedAutoIntervalLabel
-              }
-              mono
-            />
-          </div>
+          {autoStartedAt && autoStatus === "running" && (
+            <p className="text-xs text-muted-foreground">
+              Started at {formatAutoRunTime(autoStartedAt)}.
+            </p>
+          )}
 
-          {(autoMessage || (autoInterval !== "off" && !autoRunValidation.ok)) && (
+          {(autoStatus === "error" ||
+            (autoInterval !== "off" && !autoRunValidation.ok)) && (
             <p
               className={cn(
                 "text-xs",
                 autoStatus === "error" ? "text-destructive" : "text-muted-foreground"
               )}
             >
-              {autoMessage ?? autoRunValidation.reason}
+              {autoStatus === "error"
+                ? autoMessage
+                : autoRunValidation.reason}
             </p>
+          )}
+        </section>
+
+        <section className="flex flex-col gap-3 rounded-lg border border-border bg-background/45 p-3">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">
+              Agent Console
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Local session trace for Signal → Decision → Policy Gate → Execution.
+            </p>
+          </div>
+
+          {runtimeLog.length > 0 ? (
+            <div className="rounded-lg border border-cyan-400/10 bg-zinc-950/85 p-3 font-mono text-xs shadow-inner shadow-black/30">
+              {runtimeLog.map((entry) => (
+                <div
+                  key={entry.id}
+                  className="flex min-w-0 items-start gap-2 py-1"
+                >
+                  <span className="shrink-0 text-cyan-400/60">&gt;</span>
+                  <span className="shrink-0 text-muted-foreground">
+                    {formatRuntimeLogTime(entry.timestamp)}
+                  </span>
+                  <span
+                    className={cn(
+                      "shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide",
+                      runtimeLogLevelClass(entry.level)
+                    )}
+                  >
+                    {entry.level.replaceAll("_", " ")}
+                  </span>
+                  <span className="min-w-0 flex-1 text-muted-foreground">
+                    {entry.message}
+                  </span>
+                  {entry.digest ? (
+                    <span className="inline-flex shrink-0 items-center gap-1">
+                      <CopyableId value={entry.digest} label="runtime digest" />
+                      <ExplorerLink digest={entry.digest} />
+                    </span>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-dashed border-border bg-background/50 p-4 text-sm text-muted-foreground">
+              Runtime events will appear when the agent checks signals or submits PTBs.
+            </div>
           )}
         </section>
 

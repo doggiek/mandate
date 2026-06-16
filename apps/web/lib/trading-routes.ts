@@ -72,7 +72,7 @@ export const TRADING_ROUTES: TradingRoute[] = [
   {
     id: "sui_momentum_buy",
     label: "SUI Momentum",
-    description: "Signal: SUI/USD price. Action: Buy SUI with DBUSDC.",
+    description: "Signal: SUI/USD price. Action: Buy SUI with DeepBook test USDC.",
     signal: {
       strategyId: "sui_price_momentum",
       source: "sui_price",
@@ -93,7 +93,7 @@ export const TRADING_ROUTES: TradingRoute[] = [
       executable: false,
       unavailableReason:
         suiDbusdcPoolId && dbusdcCoinType
-          ? "DBUSDC generic vault execution script pending."
+          ? "DeepBook test USDC generic vault execution script pending."
           : "SUI_DBUSDC route not configured.",
     },
   },
