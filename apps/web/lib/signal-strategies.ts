@@ -26,8 +26,8 @@ export type SignalStrategy = {
 export const SIGNAL_STRATEGIES: SignalStrategy[] = [
   {
     id: "deep_sui_quote_momentum",
-    name: "Price Momentum (DeepBook Quote)",
-    description: "Trigger from live DEEP/SUI quote movement.",
+    name: "DEEP Momentum",
+    description: "Signal: DEEP/SUI quote. Action: Buy DEEP with SUI.",
     source: "deepbook_quote",
     signalType: "price_momentum",
     market: "DEEP/SUI",
@@ -35,20 +35,24 @@ export const SIGNAL_STRATEGIES: SignalStrategy[] = [
     thresholdPct: 5,
     actionLabel: "Buy DEEP with SUI",
     executionAmountSui: 1,
-    status: "available",
+    status: tradingRouteByStrategyId("deep_sui_quote_momentum")?.action.executable
+      ? "available"
+      : "coming_soon",
   },
   {
     id: "sui_price_momentum",
-    name: "SUI Price Momentum",
-    description: "Trigger from live SUI/USD price momentum.",
+    name: "SUI Momentum",
+    description: "Signal: SUI/USD price. Action: Buy SUI with DBUSDC.",
     source: "sui_price",
     signalType: "price_momentum",
     market: "SUI/USD",
     direction: "either",
     thresholdPct: 1,
-    actionLabel: "Buy DEEP with SUI",
+    actionLabel: "Buy SUI with DBUSDC",
     executionAmountSui: 1,
-    status: "available",
+    status: tradingRouteByStrategyId("sui_price_momentum")?.action.executable
+      ? "available"
+      : "coming_soon",
   },
   {
     id: "volatility_guard",
@@ -101,5 +105,11 @@ export function signalStrategyById(id: string | null | undefined) {
 }
 
 export function defaultSignalStrategy() {
-  return SIGNAL_STRATEGIES.find((strategy) => strategy.status === "available")!
+  const defaultRoute = TRADING_ROUTES.find((route) => route.action.executable)
+  return (
+    SIGNAL_STRATEGIES.find((strategy) => strategy.id === defaultRoute?.signal.strategyId) ??
+    SIGNAL_STRATEGIES.find((strategy) => strategy.status === "available") ??
+    SIGNAL_STRATEGIES[0]
+  )
 }
+import { TRADING_ROUTES, tradingRouteByStrategyId } from "@/lib/trading-routes"

@@ -54,6 +54,25 @@ public struct Mandate has key {
     sui_balance: Balance<SUI>,
 }
 
+/// Generic owner-funded mandate for non-SUI vault assets.
+///
+/// The Move layer intentionally does not whitelist tokens or pools. The vault
+/// asset is the type parameter `T`, and supported DeepBook routes are selected
+/// off-chain by backend route configuration.
+public struct AssetMandate<phantom T> has key {
+    id: UID,
+    owner: address,
+    agent: address,
+    budget_ceiling: u64,
+    current_spent: u64,
+    max_single_tx: u64,
+    protocol_scope: u8,
+    expires_at_ms: u64,
+    is_active: bool,
+    created_at_ms: u64,
+    vault_balance: Balance<T>,
+}
+
 /// Emitted when an owner creates a mandate.
 public struct CreatedEvent has copy, drop {
     mandate_id: ID,
@@ -133,6 +152,36 @@ public fun vault_balance(mandate: &Mandate): u64 {
     balance::value(&mandate.sui_balance)
 }
 
+/// Returns the amount currently escrowed in a generic asset mandate vault.
+public fun asset_vault_balance<T>(mandate: &AssetMandate<T>): u64 {
+    balance::value(&mandate.vault_balance)
+}
+
+/// Returns the owner of a generic asset mandate.
+public fun asset_owner<T>(mandate: &AssetMandate<T>): address {
+    mandate.owner
+}
+
+/// Returns the authorized agent for a generic asset mandate.
+public fun asset_agent<T>(mandate: &AssetMandate<T>): address {
+    mandate.agent
+}
+
+/// Returns total spend for a generic asset mandate.
+public fun asset_current_spent<T>(mandate: &AssetMandate<T>): u64 {
+    mandate.current_spent
+}
+
+/// Returns whether a generic asset mandate is currently active.
+public fun asset_is_active<T>(mandate: &AssetMandate<T>): bool {
+    mandate.is_active
+}
+
+/// Returns the expiry timestamp for a generic asset mandate.
+public fun asset_expires_at_ms<T>(mandate: &AssetMandate<T>): u64 {
+    mandate.expires_at_ms
+}
+
 /// Returns whether the mandate is currently active.
 public fun is_active(mandate: &Mandate): bool {
     mandate.is_active
@@ -181,6 +230,60 @@ entry fun create_mandate(
         is_active: true,
         created_at_ms,
         sui_balance: coin::into_balance(budget_coin),
+    };
+    let mandate_id = object::id(&mandate);
+
+    event::emit(CreatedEvent {
+        mandate_id,
+        owner,
+        agent,
+        budget_ceiling,
+        max_single_tx,
+        protocol: protocol_scope,
+        created_at_ms,
+        expires_at_ms,
+    });
+
+    transfer::share_object(mandate);
+}
+
+/// Creates a shared mandate funded by an arbitrary vault coin type.
+///
+/// This generic path authorizes spend by the vault asset type `T` only. It does
+/// not encode a token whitelist, trading pair list, or DeepBook pool list.
+entry fun create_mandate_with_coin<T>(
+    agent: address,
+    budget_coin: Coin<T>,
+    max_single_tx: u64,
+    protocol_scope: u8,
+    ttl_ms: u64,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let budget_ceiling = coin::value(&budget_coin);
+
+    assert!(ttl_ms > 0, E_INVALID_TTL);
+    assert!(
+        budget_ceiling > 0 && max_single_tx > 0 && max_single_tx <= budget_ceiling,
+        E_INVALID_BUDGET,
+    );
+    assert!(protocol_scope == PROTOCOL_DEEPBOOK, E_PROTOCOL_NOT_ALLOWED);
+
+    let owner = tx_context::sender(ctx);
+    let created_at_ms = clock::timestamp_ms(clock);
+    let expires_at_ms = created_at_ms + ttl_ms;
+    let mandate = AssetMandate<T> {
+        id: object::new(ctx),
+        owner,
+        agent,
+        budget_ceiling,
+        current_spent: 0,
+        max_single_tx,
+        protocol_scope,
+        expires_at_ms,
+        is_active: true,
+        created_at_ms,
+        vault_balance: coin::into_balance(budget_coin),
     };
     let mandate_id = object::id(&mandate);
 
@@ -271,6 +374,43 @@ public fun authorize_and_take_sui_for_deepbook(
     coin::from_balance(withdrawn, ctx)
 }
 
+/// Authorizes and withdraws an arbitrary vault coin type for a DeepBook PTB.
+///
+/// Backend route config decides which `T` and DeepBook pool are supported. The
+/// Move contract only enforces mandate policy over the vault asset type.
+public fun authorize_and_take_coin_for_deepbook<T>(
+    mandate: &mut AssetMandate<T>,
+    amount: u64,
+    clock: &Clock,
+    ctx: &mut TxContext,
+): Coin<T> {
+    let sender = tx_context::sender(ctx);
+    let timestamp_ms = clock::timestamp_ms(clock);
+
+    assert!(sender == mandate.agent, E_NOT_AGENT);
+    assert!(mandate.is_active, E_REVOKED);
+    assert!(timestamp_ms <= mandate.expires_at_ms, E_EXPIRED);
+    assert!(mandate.protocol_scope == PROTOCOL_DEEPBOOK, E_PROTOCOL_NOT_ALLOWED);
+    assert!(amount <= mandate.max_single_tx, E_SINGLE_TX_LIMIT_EXCEEDED);
+    assert!(amount <= mandate.budget_ceiling - mandate.current_spent, E_BUDGET_EXCEEDED);
+    assert!(amount <= balance::value(&mandate.vault_balance), E_BUDGET_EXCEEDED);
+
+    mandate.current_spent = mandate.current_spent + amount;
+    let withdrawn = balance::split(&mut mandate.vault_balance, amount);
+
+    event::emit(ActivityEvent {
+        mandate_id: object::id(mandate),
+        agent: sender,
+        action: ACTION_DEEPBOOK_SPEND_AUTHORIZED,
+        amount,
+        protocol: PROTOCOL_DEEPBOOK,
+        timestamp_ms,
+        success: true,
+    });
+
+    coin::from_balance(withdrawn, ctx)
+}
+
 /// Records a blocked agent action without consuming budget.
 ///
 /// Only the authorized agent can emit this event. The function intentionally
@@ -278,6 +418,27 @@ public fun authorize_and_take_sui_for_deepbook(
 /// failures before any DeepBook submission is attempted.
 entry fun record_blocked_action(
     mandate: &Mandate,
+    attempted_amount: u64,
+    reason: vector<u8>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let sender = tx_context::sender(ctx);
+    assert!(sender == mandate.agent, E_NOT_AGENT);
+
+    event::emit(BlockedEvent {
+        mandate_id: object::id(mandate),
+        owner: mandate.owner,
+        agent: sender,
+        attempted_amount,
+        reason,
+        timestamp_ms: clock::timestamp_ms(clock),
+    });
+}
+
+/// Records a blocked attempt for a generic asset mandate.
+entry fun record_blocked_action_for_asset<T>(
+    mandate: &AssetMandate<T>,
     attempted_amount: u64,
     reason: vector<u8>,
     clock: &Clock,
@@ -318,6 +479,25 @@ entry fun revoke_mandate(
     });
 }
 
+/// Revokes a generic asset mandate.
+#[allow(unused_mut_parameter)]
+entry fun revoke_asset_mandate<T>(
+    mandate: &mut AssetMandate<T>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let sender = tx_context::sender(ctx);
+    assert!(sender == mandate.owner, E_NOT_OWNER);
+
+    mandate.is_active = false;
+
+    event::emit(RevokeEvent {
+        mandate_id: object::id(mandate),
+        owner: sender,
+        timestamp_ms: clock::timestamp_ms(clock),
+    });
+}
+
 /// Withdraws all remaining SUI from an inactive mandate vault.
 ///
 /// The owner can recover unspent budget after revoking the mandate. This does
@@ -333,5 +513,19 @@ entry fun withdraw_remaining_sui(
 
     let amount = balance::value(&mandate.sui_balance);
     let withdrawn = balance::split(&mut mandate.sui_balance, amount);
+    transfer::public_transfer(coin::from_balance(withdrawn, ctx), sender);
+}
+
+/// Withdraws all remaining generic vault asset after revocation.
+entry fun withdraw_remaining_coin<T>(
+    mandate: &mut AssetMandate<T>,
+    ctx: &mut TxContext,
+) {
+    let sender = tx_context::sender(ctx);
+    assert!(sender == mandate.owner, E_NOT_OWNER);
+    assert!(!mandate.is_active, E_REVOKED);
+
+    let amount = balance::value(&mandate.vault_balance);
+    let withdrawn = balance::split(&mut mandate.vault_balance, amount);
     transfer::public_transfer(coin::from_balance(withdrawn, ctx), sender);
 }

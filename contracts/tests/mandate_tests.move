@@ -1,11 +1,13 @@
 #[test_only]
 module mandate::mandate_tests;
 
-use mandate::mandate::{Self, Mandate};
+use mandate::mandate::{Self, AssetMandate, Mandate};
 use sui::clock::{Self, Clock};
 use sui::coin::{Self, Coin};
 use sui::sui::SUI;
 use sui::test_scenario::{Self, Scenario};
+
+public struct TESTUSD has drop {}
 
 const OWNER: address = @0xA;
 const AGENT: address = @0xB;
@@ -24,6 +26,21 @@ fun create_default_mandate(scenario: &mut Scenario, clock: &Clock) {
         AGENT,
         budget_coin,
         20,
+        mandate::deepbook_protocol(),
+        86_400_000,
+        clock,
+        test_scenario::ctx(scenario),
+    );
+}
+
+/// Creates a generic test-asset mandate. This proves Move policy is scoped by
+/// vault coin type, not by a hardcoded token whitelist.
+fun create_testusd_mandate(scenario: &mut Scenario, clock: &Clock) {
+    let budget_coin = coin::mint_for_testing<TESTUSD>(1_000, test_scenario::ctx(scenario));
+    mandate::create_mandate_with_coin<TESTUSD>(
+        AGENT,
+        budget_coin,
+        100,
         mandate::deepbook_protocol(),
         86_400_000,
         clock,
@@ -296,6 +313,31 @@ fun agent_records_blocked_action_without_spend() {
     );
     assert!(mandate::current_spent(&mandate) == 0, 0);
     test_scenario::return_shared(mandate);
+
+    clock::destroy_for_testing(clock);
+    test_scenario::end(scenario);
+}
+
+/// Authorized agent can withdraw an arbitrary vault asset under the same policy.
+#[test]
+fun agent_takes_generic_vault_coin_success() {
+    let mut scenario = test_scenario::begin(OWNER);
+    let clock = new_clock(&mut scenario);
+
+    create_testusd_mandate(&mut scenario, &clock);
+
+    test_scenario::next_tx(&mut scenario, AGENT);
+    let mut mandate = test_scenario::take_shared<AssetMandate<TESTUSD>>(&scenario);
+    let coin = mandate::authorize_and_take_coin_for_deepbook<TESTUSD>(
+        &mut mandate,
+        100,
+        &clock,
+        test_scenario::ctx(&mut scenario),
+    );
+    assert!(mandate::asset_current_spent(&mandate) == 100, 0);
+    assert!(mandate::asset_vault_balance(&mandate) == 900, 1);
+    test_scenario::return_shared(mandate);
+    coin::burn_for_testing(coin);
 
     clock::destroy_for_testing(clock);
     test_scenario::end(scenario);

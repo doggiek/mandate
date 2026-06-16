@@ -5,10 +5,10 @@ import { promisify } from "node:util"
 import { decodeSuiPrivateKey } from "@mysten/sui/cryptography"
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519"
 import {
-  DEEPBOOK_POOL_KEY,
   LEGACY_POLICY_PACKAGE_IDS,
   BACKEND_AGENT_ADDRESS,
 } from "@/lib/chain-config"
+import { defaultTradingRoute, tradingRouteById } from "@/lib/trading-routes"
 
 const execFileAsync = promisify(execFile)
 
@@ -40,6 +40,9 @@ type AgentRunRequest = {
   ownerAddress?: unknown
   strategy?: unknown
   amountSui?: unknown
+  routeId?: unknown
+  spendAsset?: unknown
+  buyAsset?: unknown
   mandateMetadata?: unknown
 }
 
@@ -175,14 +178,27 @@ function runtimeBackendAgentAddress(repoRoot: string) {
   )
 }
 
-function runtimeDeepBookPoolId(repoRoot: string) {
+function routePoolIdEnvNames(routeId: string) {
+  if (routeId === "sui_momentum_buy") {
+    return ["NEXT_PUBLIC_DEEPBOOK_POOL_ID_SUI_DBUSDC", "DEEPBOOK_POOL_ID_SUI_DBUSDC"]
+  }
+
+  return [
+    "NEXT_PUBLIC_DEEPBOOK_POOL_ID_DEEP_SUI",
+    "NEXT_PUBLIC_DEEPBOOK_POOL_ID",
+    "DEEPBOOK_POOL_ID",
+  ]
+}
+
+function runtimeDeepBookPoolId(repoRoot: string, routeId: string, configuredPoolId: string) {
   const poolId =
-    runtimeEnvValue("NEXT_PUBLIC_DEEPBOOK_POOL_ID", repoRoot) ??
-    runtimeEnvValue("DEEPBOOK_POOL_ID", repoRoot)
+    routePoolIdEnvNames(routeId)
+      .map((name) => runtimeEnvValue(name, repoRoot))
+      .find(Boolean) ?? configuredPoolId
 
   if (!poolId) {
     throw new Error(
-      "DeepBook swap unavailable; fallback transfer disabled. Missing NEXT_PUBLIC_DEEPBOOK_POOL_ID."
+      `DeepBook swap unavailable; fallback transfer disabled. Missing pool id for route ${routeId}.`
     )
   }
 
@@ -416,6 +432,25 @@ function requestStrategy(body: AgentRunRequest) {
   return typeof body.strategy === "string" ? body.strategy : "normal"
 }
 
+function requestTradingRoute(body: AgentRunRequest) {
+  const route =
+    typeof body.routeId === "string"
+      ? tradingRouteById(body.routeId)
+      : defaultTradingRoute()
+
+  if (!route) {
+    throw new Error(`Unknown trading route: ${String(body.routeId)}`)
+  }
+  if (!route.action.executable) {
+    throw new Error(
+      route.action.unavailableReason ??
+        `Trading route ${route.id} is not executable in this build.`
+    )
+  }
+
+  return route
+}
+
 function requestBlockedReason(body: AgentRunRequest) {
   const strategy = requestStrategy(body)
   if (strategy === "exceed_per_tx") {
@@ -442,16 +477,22 @@ export async function POST(request: Request) {
   let agentPrivateKey: string
   let backendAgentAddress: string
   let deepBookPoolId: string
+  let tradingRoute: ReturnType<typeof requestTradingRoute>
 
   try {
     mandateId = requestMandateId(body)
     ownerAddress = requestOwnerAddress(body)
     amountSui = requestAmountSui(body)
     blockedReason = requestBlockedReason(body)
+    tradingRoute = requestTradingRoute(body)
     packageId = runtimePackageId(repoRoot)
     agentPrivateKey = runtimeAgentPrivateKey(repoRoot)
     backendAgentAddress = runtimeBackendAgentAddress(repoRoot)
-    deepBookPoolId = runtimeDeepBookPoolId(repoRoot)
+    deepBookPoolId = runtimeDeepBookPoolId(
+      repoRoot,
+      tradingRoute.id,
+      tradingRoute.action.poolId
+    )
     assertBackendAgentMatchesSigner(backendAgentAddress, agentPrivateKey)
   } catch (caught) {
     const error = caught instanceof Error ? caught.message : String(caught)
@@ -463,9 +504,12 @@ export async function POST(request: Request) {
     mandateId,
     amountSui,
     strategy: requestStrategy(body),
+    routeId: tradingRoute.id,
     packageId,
-    poolKey: DEEPBOOK_POOL_KEY,
+    poolKey: tradingRoute.action.poolKey,
     poolId: deepBookPoolId,
+    spendAsset: tradingRoute.action.spendAsset,
+    buyAsset: tradingRoute.action.buyAsset,
   })
 
   try {
@@ -507,10 +551,13 @@ export async function POST(request: Request) {
           NEXT_PUBLIC_PACKAGE_ID: packageId,
           NEXT_PUBLIC_BACKEND_AGENT_ADDRESS: backendAgentAddress,
           MANDATE_ID: mandateId,
-          POOL_KEY: DEEPBOOK_POOL_KEY,
+          ROUTE_ID: tradingRoute.id,
+          POOL_KEY: tradingRoute.action.poolKey,
           DEEPBOOK_POOL_ID: deepBookPoolId,
           NEXT_PUBLIC_DEEPBOOK_POOL_ID: deepBookPoolId,
           AMOUNT_SUI: amountSui,
+          SPEND_ASSET: tradingRoute.action.spendAsset,
+          BUY_ASSET: tradingRoute.action.buyAsset,
           STRATEGY: requestStrategy(body),
           ...(blockedReason ? { BLOCK_REASON: blockedReason } : {}),
         },
@@ -525,7 +572,8 @@ export async function POST(request: Request) {
       mandateId,
       amountSui,
       packageId,
-      poolKey: DEEPBOOK_POOL_KEY,
+      routeId: tradingRoute.id,
+      poolKey: tradingRoute.action.poolKey,
       poolId: deepBookPoolId,
       status: executionLogStatus(result),
     })
@@ -546,7 +594,8 @@ export async function POST(request: Request) {
       mandateId,
       amountSui,
       packageId,
-      poolKey: DEEPBOOK_POOL_KEY,
+      routeId: tradingRoute.id,
+      poolKey: tradingRoute.action.poolKey,
       poolId: deepBookPoolId,
       status: executionLogStatus(result),
     })

@@ -44,6 +44,7 @@ import {
   signalStrategyById,
   type SignalDirection,
 } from "@/lib/signal-strategies"
+import { tradingRouteByStrategyId } from "@/lib/trading-routes"
 import { cn } from "@/lib/utils"
 
 type AgentRunResult = {
@@ -578,6 +579,7 @@ export function AgentExecutionPanel() {
   )
   const selectedSignalStrategy =
     signalStrategyById(signalStrategyId) ?? defaultSignalStrategy()
+  const selectedTradingRoute = tradingRouteByStrategyId(selectedSignalStrategy.id)
 
   React.useEffect(() => {
     setResult(lastRunReceipt.result)
@@ -1106,6 +1108,9 @@ export function AgentExecutionPanel() {
             ownerAddress: account?.address,
             strategy: runStrategy,
             amountSui,
+            routeId: selectedTradingRoute?.id,
+            spendAsset: selectedTradingRoute?.action.spendAsset,
+            buyAsset: selectedTradingRoute?.action.buyAsset,
             mandateMetadata: {
               budgetSui: selectedMandate.budget,
               spentSui: selectedMandate.spent,
@@ -1164,7 +1169,7 @@ export function AgentExecutionPanel() {
         recordAgentExecution({
           mandateId: selectedMandate.id,
           digest: payload.digest,
-          pair: DEEPBOOK_POOL_KEY,
+          pair: selectedTradingRoute?.action.poolKey ?? DEEPBOOK_POOL_KEY,
           side: "Buy",
           amountSui,
           suiBalanceChange: parseSuiBalanceChange(payload.balanceChangeSui),
@@ -1220,6 +1225,7 @@ export function AgentExecutionPanel() {
       scheduleRefresh,
       selectedMandate,
       selectedProtocol,
+      selectedTradingRoute,
       validateRunStrategy,
       actionAmountSui,
     ]
@@ -1775,7 +1781,7 @@ export function AgentExecutionPanel() {
             </p>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
               <span className="text-xs text-muted-foreground">
                 Execution Amount
@@ -1791,30 +1797,31 @@ export function AgentExecutionPanel() {
                   }
                   className="h-8 bg-background/70 font-mono"
                 />
-                <span className="text-xs text-muted-foreground">SUI</span>
+                <span className="text-xs text-muted-foreground">
+                  {selectedTradingRoute?.action.spendAsset ?? executionAsset}
+                </span>
               </div>
             </div>
             <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
-              <span className="text-xs text-muted-foreground">Asset</span>
-              <Select
-                value={executionAsset}
-                onValueChange={(value) => setExecutionAsset(value as "SUI")}
+              <span className="text-xs text-muted-foreground">Spend asset</span>
+              <span className="mt-2 truncate text-sm font-medium text-foreground">
+                {selectedTradingRoute?.action.spendAsset ?? executionAsset}
+              </span>
+            </div>
+            <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
+              <span className="text-xs text-muted-foreground">Buy asset</span>
+              <span className="mt-2 truncate text-sm font-medium text-foreground">
+                {selectedTradingRoute?.action.buyAsset ?? "DEEP"}
+              </span>
+            </div>
+            <div className="flex min-h-[58px] min-w-0 flex-col justify-between rounded-lg border border-border bg-background/60 p-3">
+              <span className="text-xs text-muted-foreground">Route / Pool</span>
+              <span
+                className="mt-2 truncate font-mono text-sm text-foreground"
+                title={selectedTradingRoute?.action.poolId}
               >
-                <SelectTrigger className="mt-2 h-8 w-full bg-background/70">
-                  <span className="truncate text-left text-sm">
-                    {executionAsset}
-                  </span>
-                </SelectTrigger>
-                <SelectContent align="start">
-                  <SelectGroup>
-                    {EXECUTION_ASSETS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+                {selectedTradingRoute?.action.poolKey ?? DEEPBOOK_POOL_KEY}
+              </span>
             </div>
           </div>
         </section>
@@ -1828,7 +1835,7 @@ export function AgentExecutionPanel() {
               The Mandate policy gate is evaluated before DeepBook execution.
             </p>
           </div>
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-4">
             {[
               {
                 label: "Within max tx",
@@ -1850,6 +1857,16 @@ export function AgentExecutionPanel() {
                 detail: selectedMandate
                   ? selectedMandate.status
                   : "-",
+              },
+              {
+                label: "Spend asset type",
+                ok: selectedTradingRoute?.action.executable !== false,
+                detail:
+                  selectedTradingRoute?.action.spendAsset === "SUI"
+                    ? "SUI vault"
+                    : selectedTradingRoute?.action.executable
+                      ? "Generic vault route"
+                      : selectedTradingRoute?.action.unavailableReason ?? "Route unavailable",
               },
             ].map((item) => (
               <div
