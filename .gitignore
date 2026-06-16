@@ -11,4 +11,17 @@ contracts/build/
 contracts/Published.toml.bak
 contracts/deployments/testnet/*.json
 !contracts/deployments/testnet/.gitkeep
+
+# OS
 .DS_Store
+**/.DS_Store
+
+# dependencies
+node_modules/
+**/node_modules/
+
+# build/cache
+.next/
+**/.next/
+*.tsbuildinfo
+**/*.tsbuildinfo

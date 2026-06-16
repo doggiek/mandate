@@ -101,6 +101,11 @@ type AutomationSessionState = {
   executionAsset: "SUI"
   running: boolean
 }
+type AutomationActiveLock = {
+  sessionId: string
+  scope: string
+  updatedAt: number
+}
 type SignalStatus = {
   strategyId: string
   signalType: "price_momentum" | "volatility" | "whale_flow" | "ai_signal"
@@ -124,6 +129,8 @@ let lastRunReceipt: LastRunReceipt = {
 const AUTOMATION_SESSION_PREFIX = "mandate:automation-session:v1"
 const AUTOMATION_SELECTED_MANDATE_PREFIX =
   "mandate:automation-selected-mandate:v1"
+const AUTOMATION_ACTIVE_LOCK_KEY = "mandate:automation-active-session:v1"
+const AUTOMATION_LOCK_STALE_MS = 15_000
 
 const AGENT_MISMATCH_MESSAGE =
   "Agent wallet mismatch. The selected mandate must authorize the backend Trading Agent wallet."
@@ -430,8 +437,50 @@ function writeJsonStorage<T>(key: string, value: T) {
   }
 }
 
+function removeStorage(key: string) {
+  if (typeof window === "undefined") {
+    return
+  }
+
+  try {
+    window.localStorage.removeItem(key)
+  } catch {
+    // Demo persistence only; ignore private browsing / quota failures.
+  }
+}
+
 function scopedStorageKey(prefix: string, scope: string) {
   return `${prefix}:${scope}`
+}
+
+function activeAutomationLock() {
+  return readJsonStorage<AutomationActiveLock>(AUTOMATION_ACTIVE_LOCK_KEY)
+}
+
+function isActiveAutomationLock(lock: AutomationActiveLock | null) {
+  return Boolean(lock && Date.now() - lock.updatedAt < AUTOMATION_LOCK_STALE_MS)
+}
+
+function writeActiveAutomationLock(sessionId: string, scope: string) {
+  writeJsonStorage<AutomationActiveLock>(AUTOMATION_ACTIVE_LOCK_KEY, {
+    sessionId,
+    scope,
+    updatedAt: Date.now(),
+  })
+}
+
+function releaseActiveAutomationLock(sessionId: string) {
+  const lock = activeAutomationLock()
+  if (!lock || lock.sessionId === sessionId) {
+    removeStorage(AUTOMATION_ACTIVE_LOCK_KEY)
+  }
+}
+
+function releaseActiveAutomationLockForScope(scope: string) {
+  const lock = activeAutomationLock()
+  if (lock?.scope === scope) {
+    removeStorage(AUTOMATION_ACTIVE_LOCK_KEY)
+  }
 }
 
 function formatCountdown(nextRunAt: number | null, nowMs: number) {
@@ -490,6 +539,11 @@ export function AgentExecutionPanel() {
   const autoInFlightRef = React.useRef(false)
   const loadedScopeRef = React.useRef<string | null>(null)
   const skipNextPersistRef = React.useRef(false)
+  const automationSessionIdRef = React.useRef(
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random()}`
+  )
   const selectedSignalStrategy =
     signalStrategyById(signalStrategyId) ?? defaultSignalStrategy()
 
@@ -516,6 +570,7 @@ export function AgentExecutionPanel() {
       if (autoTimerRef.current) {
         window.clearTimeout(autoTimerRef.current)
       }
+      releaseActiveAutomationLock(automationSessionIdRef.current)
     }
   }, [])
 
@@ -616,6 +671,19 @@ export function AgentExecutionPanel() {
       selectedMandate.id.toLowerCase(),
     ].join(":")
   }, [account?.address, selectedMandate?.id])
+
+  React.useEffect(() => {
+    if (autoStatus !== "running" || !automationScope) {
+      return
+    }
+
+    writeActiveAutomationLock(automationSessionIdRef.current, automationScope)
+    const heartbeat = window.setInterval(() => {
+      writeActiveAutomationLock(automationSessionIdRef.current, automationScope)
+    }, 5_000)
+
+    return () => window.clearInterval(heartbeat)
+  }, [autoStatus, automationScope])
 
   const mandateSummary = React.useMemo(
     () => [
@@ -781,6 +849,7 @@ export function AgentExecutionPanel() {
       window.clearTimeout(autoTimerRef.current)
       autoTimerRef.current = null
     }
+    releaseActiveAutomationLock(automationSessionIdRef.current)
     autoInFlightRef.current = false
     setAutoStatus("off")
     setAutoMessage(null)
@@ -823,6 +892,7 @@ export function AgentExecutionPanel() {
     setExecutionAsset(savedSession.executionAsset ?? "SUI")
 
     if (savedSession.running) {
+      releaseActiveAutomationLockForScope(automationScope)
       setAutoStatus("stopped")
       setAutoMessage("Automation session interrupted. Click Start to resume.")
     }
@@ -870,6 +940,7 @@ export function AgentExecutionPanel() {
         window.clearTimeout(autoTimerRef.current)
         autoTimerRef.current = null
       }
+      releaseActiveAutomationLock(automationSessionIdRef.current)
       autoInFlightRef.current = false
       setAutoStatus(status)
       setAutoNextRunAt(null)
@@ -1000,6 +1071,7 @@ export function AgentExecutionPanel() {
           },
           body: JSON.stringify({
             mandateId: selectedMandate.id,
+            ownerAddress: account?.address,
             strategy: runStrategy,
             amountSui,
             mandateMetadata: {
@@ -1109,6 +1181,7 @@ export function AgentExecutionPanel() {
       }
     },
     [
+      account?.address,
       recordAgentExecution,
       recordBlockedAction,
       remainingBudget,
@@ -1209,6 +1282,10 @@ export function AgentExecutionPanel() {
 
   const startAutoRun = React.useCallback(() => {
     const validation = validateRunStrategy(policyStrategy)
+    if (autoStatus === "running") {
+      setAutoMessage("Automation is already running in this browser session.")
+      return
+    }
     if (executionMode !== "auto_execute") {
       setAutoStatus("error")
       setAutoMessage("Switch execution mode to Auto execute before starting Automation.")
@@ -1229,6 +1306,26 @@ export function AgentExecutionPanel() {
       setAutoMessage(validation.reason ?? "Auto Run cannot start.")
       return
     }
+    if (!automationScope) {
+      setAutoStatus("error")
+      setAutoMessage("Select a mandate before starting Automation.")
+      return
+    }
+
+    const lock = activeAutomationLock()
+    if (
+      isActiveAutomationLock(lock) &&
+      lock?.sessionId !== automationSessionIdRef.current
+    ) {
+      setAutoStatus("error")
+      setAutoMessage("Another automation session is already running in this browser.")
+      return
+    }
+    if (autoTimerRef.current) {
+      window.clearTimeout(autoTimerRef.current)
+      autoTimerRef.current = null
+    }
+    writeActiveAutomationLock(automationSessionIdRef.current, automationScope)
 
     setAutoStatus("running")
     setAutoMessage(null)
@@ -1240,6 +1337,8 @@ export function AgentExecutionPanel() {
     void runAutoOnce()
   }, [
     autoInterval,
+    autoStatus,
+    automationScope,
     executionMode,
     policyStrategy,
     runAutoOnce,

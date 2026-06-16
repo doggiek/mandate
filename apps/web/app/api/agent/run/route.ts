@@ -5,7 +5,6 @@ import { promisify } from "node:util"
 import { decodeSuiPrivateKey } from "@mysten/sui/cryptography"
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519"
 import {
-  CURRENT_MANDATE_ID,
   DEEPBOOK_POOL_KEY,
   LEGACY_POLICY_PACKAGE_IDS,
   BACKEND_AGENT_ADDRESS,
@@ -38,6 +37,7 @@ type AgentRunResult = {
 
 type AgentRunRequest = {
   mandateId?: unknown
+  ownerAddress?: unknown
   strategy?: unknown
   amountSui?: unknown
   mandateMetadata?: unknown
@@ -272,6 +272,9 @@ async function fetchMandateObjectType(mandateId: string) {
         content?: {
           dataType?: string
           type?: string
+          fields?: {
+            owner?: string
+          }
         }
       }
     }
@@ -282,7 +285,9 @@ async function fetchMandateObjectType(mandateId: string) {
   }
 
   const content = payload.result?.data?.content
-  return content?.dataType === "moveObject" ? content.type : undefined
+  return content?.dataType === "moveObject"
+    ? { objectType: content.type, owner: content.fields?.owner }
+    : { objectType: undefined, owner: undefined }
 }
 
 function parseAgentOutput(output: string, error?: string): AgentRunResult {
@@ -365,6 +370,16 @@ function classifyBlockedReason(message?: string) {
   return undefined
 }
 
+function executionLogStatus(result: AgentRunResult) {
+  if (result.status === "BLOCKED") {
+    return "blocked"
+  }
+  if (result.status === "FAILED") {
+    return "failed"
+  }
+  return result.fillStatus ?? "success"
+}
+
 async function readAgentRequest(request: Request) {
   try {
     return (await request.json()) as AgentRunRequest
@@ -374,9 +389,21 @@ async function readAgentRequest(request: Request) {
 }
 
 function requestMandateId(body: AgentRunRequest) {
-  return typeof body.mandateId === "string" && body.mandateId.trim()
-      ? body.mandateId.trim()
-      : CURRENT_MANDATE_ID
+  if (typeof body.mandateId === "string" && body.mandateId.trim()) {
+    return body.mandateId.trim()
+  }
+
+  throw new Error(
+    "mandateId is required. Automation must explicitly select a Mandate; MANDATE_ID is only a local script/debug fallback."
+  )
+}
+
+function requestOwnerAddress(body: AgentRunRequest) {
+  if (typeof body.ownerAddress === "string" && body.ownerAddress.trim()) {
+    return body.ownerAddress.trim()
+  }
+
+  throw new Error("ownerAddress is required for stateless agent execution.")
 }
 
 function requestAmountSui(body: AgentRunRequest) {
@@ -407,15 +434,20 @@ function requestBlockedReason(body: AgentRunRequest) {
 export async function POST(request: Request) {
   const repoRoot = findRepoRoot()
   const body = await readAgentRequest(request)
-  const mandateId = requestMandateId(body)
-  const amountSui = requestAmountSui(body)
-  const blockedReason = requestBlockedReason(body)
+  let mandateId: string
+  let ownerAddress: string
+  let amountSui: string
+  let blockedReason: string | undefined
   let packageId: string
   let agentPrivateKey: string
   let backendAgentAddress: string
   let deepBookPoolId: string
 
   try {
+    mandateId = requestMandateId(body)
+    ownerAddress = requestOwnerAddress(body)
+    amountSui = requestAmountSui(body)
+    blockedReason = requestBlockedReason(body)
     packageId = runtimePackageId(repoRoot)
     agentPrivateKey = runtimeAgentPrivateKey(repoRoot)
     backendAgentAddress = runtimeBackendAgentAddress(repoRoot)
@@ -423,11 +455,21 @@ export async function POST(request: Request) {
     assertBackendAgentMatchesSigner(backendAgentAddress, agentPrivateKey)
   } catch (caught) {
     const error = caught instanceof Error ? caught.message : String(caught)
-    return Response.json({ ...EMPTY_RESULT, error }, { status: 500 })
+    return Response.json({ ...EMPTY_RESULT, error }, { status: 400 })
   }
 
+  console.info("[MANDATE] agent run request", {
+    owner: ownerAddress,
+    mandateId,
+    amountSui,
+    strategy: requestStrategy(body),
+    packageId,
+    poolKey: DEEPBOOK_POOL_KEY,
+    poolId: deepBookPoolId,
+  })
+
   try {
-    const objectType = await fetchMandateObjectType(mandateId)
+    const { objectType, owner } = await fetchMandateObjectType(mandateId)
     if (!isCurrentMandateObjectType(objectType, packageId)) {
       return Response.json(
         {
@@ -435,6 +477,15 @@ export async function POST(request: Request) {
           error: `${OLD_PACKAGE_ERROR} Expected ${packageId}::mandate::Mandate, got ${objectType ?? "unknown object type"}.`,
         },
         { status: 400 }
+      )
+    }
+    if (owner && normalizeSuiAddress(owner) !== normalizeSuiAddress(ownerAddress)) {
+      return Response.json(
+        {
+          ...EMPTY_RESULT,
+          error: `Selected mandate owner mismatch. Request owner ${ownerAddress}, object owner ${owner}.`,
+        },
+        { status: 403 }
       )
     }
   } catch (caught) {
@@ -469,6 +520,15 @@ export async function POST(request: Request) {
     )
 
     const result = parseAgentOutput(stdout, stderr.trim() || undefined)
+    console.info("[MANDATE] agent run result", {
+      owner: ownerAddress,
+      mandateId,
+      amountSui,
+      packageId,
+      poolKey: DEEPBOOK_POOL_KEY,
+      poolId: deepBookPoolId,
+      status: executionLogStatus(result),
+    })
     return Response.json(result, { status: result.status === "FAILED" ? 500 : 200 })
   } catch (caught) {
     const error = caught as {
@@ -481,6 +541,15 @@ export async function POST(request: Request) {
       ? parseAgentOutput(output, error.stderr?.trim() || error.message)
       : { ...EMPTY_RESULT, error: error.message ?? "Agent execution failed" }
 
+    console.info("[MANDATE] agent run result", {
+      owner: ownerAddress,
+      mandateId,
+      amountSui,
+      packageId,
+      poolKey: DEEPBOOK_POOL_KEY,
+      poolId: deepBookPoolId,
+      status: executionLogStatus(result),
+    })
     return Response.json(result, { status: result.status === "BLOCKED" ? 200 : 500 })
   }
 }
