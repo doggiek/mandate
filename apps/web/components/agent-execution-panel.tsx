@@ -110,7 +110,9 @@ type SignalStatus = {
   strategyId: string
   signalType: "price_momentum" | "volatility" | "whale_flow" | "ai_signal"
   market: string
-  source: "mock" | "deepbook" | "deepbook_quote"
+  source: "mock" | "deepbook" | "deepbook_quote" | "sui_price"
+  targetAsset?: string
+  quoteAsset?: string
   poolKey?: string
   poolId?: string
   inputAsset?: string
@@ -397,6 +399,10 @@ function formatSignalQuote(signal: SignalStatus | null, value?: number) {
 
   if (signal.inputAsset && signal.outputAsset && typeof signal.inputAmount === "number") {
     return `${formatAmount(signal.inputAmount)} ${signal.inputAsset} -> ${formatAmount(value)} ${signal.outputAsset}`
+  }
+
+  if (signal.source === "sui_price" && signal.quoteAsset) {
+    return `${formatAmount(value)} ${signal.quoteAsset}`
   }
 
   return formatSignalValue(value)
@@ -1229,6 +1235,7 @@ export function AgentExecutionPanel() {
       try {
         const params = new URLSearchParams({
           strategyId: selectedSignalStrategy.id,
+          source: selectedSignalStrategy.source,
           thresholdPct: String(thresholdPct),
           direction: signalDirection,
           amountSui: String(actionAmountSui || 1),
@@ -1248,7 +1255,14 @@ export function AgentExecutionPanel() {
         setIsCheckingSignal(false)
       }
     },
-    [actionAmountSui, forceSignalTriggered, selectedSignalStrategy.id, signalDirection, thresholdPct]
+    [
+      actionAmountSui,
+      forceSignalTriggered,
+      selectedSignalStrategy.id,
+      selectedSignalStrategy.source,
+      signalDirection,
+      thresholdPct,
+    ]
   )
 
   const runAutoOnce = React.useCallback(async () => {
@@ -1282,6 +1296,12 @@ export function AgentExecutionPanel() {
       return
     }
 
+    console.info("[MANDATE_AUTOMATION] signal triggered", {
+      source: signal.source,
+      currentValue: signal.currentValue,
+      changePct: signal.changePct,
+      decision: signal.decision,
+    })
     setAutoMessage("Signal triggered. Submitting backend agent execution.")
     const outcome = await executeAgentRun(policyStrategy)
     autoInFlightRef.current = false
@@ -1354,6 +1374,12 @@ export function AgentExecutionPanel() {
     }
     writeActiveAutomationLock(automationSessionIdRef.current, automationScope)
 
+    console.info("[MANDATE_AUTOMATION] start", {
+      strategyId: selectedSignalStrategy.id,
+      source: selectedSignalStrategy.source,
+      market: selectedSignalStrategy.market,
+      threshold: thresholdPct,
+    })
     setAutoStatus("running")
     setAutoMessage(null)
     setAutoStartedAt(Date.now())
@@ -1369,7 +1395,11 @@ export function AgentExecutionPanel() {
     executionMode,
     policyStrategy,
     runAutoOnce,
+    selectedSignalStrategy.id,
+    selectedSignalStrategy.market,
+    selectedSignalStrategy.source,
     thresholdValid,
+    thresholdPct,
     validateRunStrategy,
   ])
 
@@ -1612,7 +1642,7 @@ export function AgentExecutionPanel() {
               Trigger Conditions
             </h3>
             <p className="text-xs text-muted-foreground">
-              Real DeepBook quote source; replaceable with oracle feed later.
+              Select a signal source, then configure the trigger threshold.
             </p>
           </div>
 
@@ -1861,7 +1891,7 @@ export function AgentExecutionPanel() {
                 Live Signal status
               </h3>
               <p className="text-xs text-muted-foreground">
-                Real DeepBook quote source. Use
+                Live signal source. Use
                 <span className="font-mono"> /api/agent/signal?force=triggered </span>
                 for demo triggering.
               </p>
@@ -1880,7 +1910,7 @@ export function AgentExecutionPanel() {
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             <SummaryChip
               label="Signal source"
-              value={liveSignal?.source ?? "deepbook_quote"}
+              value={liveSignal?.source ?? selectedSignalStrategy.source}
             />
             <SummaryChip
               label="Signal type"

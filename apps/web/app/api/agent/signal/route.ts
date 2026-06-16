@@ -12,6 +12,15 @@ import {
   signalStrategyById,
   type SignalDirection,
 } from "@/lib/signal-strategies"
+import {
+  defaultSignalSource,
+  signalBaselineScope,
+  signalDecisionMet,
+  signalSourceById,
+  signalSourceBySource,
+  type SignalQuotePayload,
+  type SignalSourceId,
+} from "@/lib/signal-sources"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -33,6 +42,10 @@ function directionParam(value: string | null): SignalDirection {
   return value === "up" || value === "down" || value === "either"
     ? value
     : "either"
+}
+
+function sourceParam(value: string | null): SignalSourceId | null {
+  return value === "deepbook_quote" || value === "sui_price" ? value : null
 }
 
 function fullnodeUrl() {
@@ -119,28 +132,89 @@ async function quoteSuiInput(inputAmountSui: number) {
   }
 }
 
-function decide(changePct: number, thresholdPct: number, direction: SignalDirection) {
-  const thresholdMet = Math.abs(changePct) >= thresholdPct
-  const directionMatches =
-    direction === "either" ||
-    (direction === "up" && changePct >= thresholdPct) ||
-    (direction === "down" && changePct <= -thresholdPct)
+async function fetchSuiUsdPrice() {
+  const response = await fetch(
+    "https://api.coingecko.com/api/v3/simple/price?ids=sui&vs_currencies=usd",
+    {
+      cache: "no-store",
+      headers: {
+        accept: "application/json",
+      },
+    }
+  )
 
-  return thresholdMet && directionMatches
+  if (!response.ok) {
+    throw new Error(`price unavailable: CoinGecko returned ${response.status}`)
+  }
+
+  const payload = (await response.json()) as { sui?: { usd?: number } }
+  const price = payload.sui?.usd
+  if (typeof price !== "number" || !Number.isFinite(price) || price <= 0) {
+    throw new Error("price unavailable: SUI/USD price missing")
+  }
+
+  return price
+}
+
+function formatCurrentValue(quote: SignalQuotePayload) {
+  if (
+    quote.source === "deepbook_quote" &&
+    quote.inputAsset &&
+    quote.outputAsset &&
+    typeof quote.inputAmount === "number"
+  ) {
+    return `${quote.inputAmount} ${quote.inputAsset} -> ${quote.currentValue} ${quote.outputAsset}`
+  }
+
+  return `${quote.currentValue} ${quote.quoteAsset}`
+}
+
+function signalReason(params: {
+  force: boolean
+  initialized: boolean
+  decision: SignalDecision
+  quote: SignalQuotePayload
+  changePct: number
+  thresholdPct: number
+  direction: SignalDirection
+}) {
+  const value = formatCurrentValue(params.quote)
+  const sourceLabel =
+    params.quote.source === "sui_price" ? "SUI price" : "DeepBook quote"
+
+  if (params.force) {
+    return `Force-triggered with live ${sourceLabel} ${value}.`
+  }
+  if (params.initialized) {
+    return `${sourceLabel} baseline initialized at ${value}.`
+  }
+  if (params.decision === "triggered") {
+    return `${sourceLabel} moved ${params.changePct.toFixed(2)}%, meeting the ${params.thresholdPct}% ${params.direction} trigger.`
+  }
+  return `${sourceLabel} moved ${params.changePct.toFixed(2)}%, below the ${params.thresholdPct}% ${params.direction} trigger.`
 }
 
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const force = url.searchParams.get("force")
-  const strategy =
+  const requestedSource = sourceParam(url.searchParams.get("source"))
+  const strategyFromId =
     signalStrategyById(url.searchParams.get("strategyId")) ??
-    defaultSignalStrategy()
+    (requestedSource ? undefined : defaultSignalStrategy())
+  const sourceDefinition =
+    signalSourceById(strategyFromId?.id) ??
+    signalSourceBySource(requestedSource) ??
+    defaultSignalSource()
+  const strategy = strategyFromId ?? signalStrategyById(sourceDefinition.id) ?? defaultSignalStrategy()
+  const source = requestedSource ?? strategy.source ?? sourceDefinition.source
+  const activeSource =
+    signalSourceBySource(source) ?? signalSourceById(strategy.id) ?? sourceDefinition
   const thresholdPct = Math.max(
     0,
-    numericParam(url.searchParams.get("thresholdPct"), strategy.thresholdPct)
+    numericParam(url.searchParams.get("thresholdPct"), activeSource.defaultThresholdPct)
   )
   const direction = directionParam(
-    url.searchParams.get("direction") ?? strategy.direction
+    url.searchParams.get("direction") ?? activeSource.defaultDirection
   )
   const inputAmount = Math.max(
     0,
@@ -152,78 +226,112 @@ export async function GET(request: Request) {
   const checkedAt = new Date().toISOString()
 
   try {
-    const quote = await quoteSuiInput(inputAmount || 1)
-    const baselineScope = [
-      NETWORK,
-      DEEPBOOK_POOL_KEY,
-      DEEPBOOK_POOL_ID,
-      strategy.id,
-      quote.inputAsset,
-      quote.outputAsset,
-      quote.inputAmount,
-    ].join(":")
+    let quote: SignalQuotePayload
+    if (activeSource.source === "sui_price") {
+      quote = {
+        source: "sui_price",
+        market: activeSource.market,
+        targetAsset: activeSource.targetAsset,
+        quoteAsset: activeSource.quoteAsset,
+        currentValue: await fetchSuiUsdPrice(),
+      }
+    } else {
+      const deepbookQuote = await quoteSuiInput(inputAmount || 1)
+      quote = {
+        source: "deepbook_quote",
+        market: deepbookQuote.market,
+        targetAsset: deepbookQuote.outputAsset,
+        quoteAsset: deepbookQuote.inputAsset,
+        poolKey: DEEPBOOK_POOL_KEY,
+        poolId: DEEPBOOK_POOL_ID,
+        inputAsset: deepbookQuote.inputAsset,
+        outputAsset: deepbookQuote.outputAsset,
+        inputAmount: deepbookQuote.inputAmount,
+        currentValue: deepbookQuote.outputAmount,
+        residualSui: deepbookQuote.residualSui,
+      }
+    }
+
+    const baselineScope = signalBaselineScope({
+      network: NETWORK,
+      strategyId: activeSource.id,
+      source: activeSource.source,
+      market: activeSource.market,
+      window: activeSource.defaultWindow,
+      thresholdPct,
+      direction,
+      inputAmount: activeSource.source === "deepbook_quote" ? quote.inputAmount : undefined,
+    })
     const existingBaseline = baselineByScope.get(baselineScope)
-    const baselineValue = existingBaseline ?? quote.outputAmount
+    const baselineValue = existingBaseline ?? quote.currentValue
     if (existingBaseline == null) {
-      baselineByScope.set(baselineScope, quote.outputAmount)
+      baselineByScope.set(baselineScope, quote.currentValue)
     }
 
     const changePct =
       baselineValue > 0
-        ? Number((((quote.outputAmount - baselineValue) / baselineValue) * 100).toFixed(4))
+        ? Number((((quote.currentValue - baselineValue) / baselineValue) * 100).toFixed(4))
         : 0
-    const triggered = decide(changePct, thresholdPct, direction)
+    const triggered = signalDecisionMet(changePct, thresholdPct, direction)
     const decision: SignalDecision =
       force === "triggered" || (existingBaseline != null && triggered)
         ? "triggered"
         : "waiting"
 
     return Response.json({
-      strategyId: strategy.id,
-      signalType: strategy.signalType,
-      source: "deepbook_quote",
+      strategyId: activeSource.id,
+      signalType: activeSource.type,
+      source: activeSource.source,
       market: quote.market,
-      poolKey: DEEPBOOK_POOL_KEY,
-      poolId: DEEPBOOK_POOL_ID,
+      targetAsset: quote.targetAsset,
+      quoteAsset: quote.quoteAsset,
+      poolKey: quote.poolKey,
+      poolId: quote.poolId,
       inputAsset: quote.inputAsset,
       outputAsset: quote.outputAsset,
       inputAmount: quote.inputAmount,
       baselineValue,
-      currentValue: quote.outputAmount,
+      currentValue: quote.currentValue,
       residualSui: quote.residualSui,
       changePct,
       thresholdPct,
       direction,
       decision,
-      reason:
-        force === "triggered"
-          ? `Force-triggered with live DeepBook quote ${quote.inputAmount} ${quote.inputAsset} -> ${quote.outputAmount} ${quote.outputAsset}.`
-          : existingBaseline == null
-          ? `DeepBook quote baseline initialized at ${quote.inputAmount} ${quote.inputAsset} -> ${quote.outputAmount} ${quote.outputAsset}.`
-          : decision === "triggered"
-            ? `DeepBook quote moved ${changePct.toFixed(2)}%, meeting the ${thresholdPct}% ${direction} trigger.`
-            : `DeepBook quote moved ${changePct.toFixed(2)}%, below the ${thresholdPct}% ${direction} trigger.`,
+      reason: signalReason({
+        force: force === "triggered",
+        initialized: existingBaseline == null,
+        decision,
+        quote,
+        changePct,
+        thresholdPct,
+        direction,
+      }),
       checkedAt,
     })
   } catch (caught) {
     const error = caught instanceof Error ? caught.message : String(caught)
     return Response.json({
-      strategyId: strategy.id,
-      signalType: strategy.signalType,
-      source: "deepbook_quote",
-      market: strategy.market,
-      poolKey: DEEPBOOK_POOL_KEY,
-      poolId: DEEPBOOK_POOL_ID,
-      inputAsset: "SUI",
-      outputAsset: "DEEP",
-      inputAmount,
+      strategyId: activeSource.id,
+      signalType: activeSource.type,
+      source: activeSource.source,
+      market: activeSource.market,
+      targetAsset: activeSource.targetAsset,
+      quoteAsset: activeSource.quoteAsset,
+      poolKey: activeSource.source === "deepbook_quote" ? DEEPBOOK_POOL_KEY : undefined,
+      poolId: activeSource.source === "deepbook_quote" ? DEEPBOOK_POOL_ID : undefined,
+      inputAsset: activeSource.source === "deepbook_quote" ? "SUI" : undefined,
+      outputAsset: activeSource.source === "deepbook_quote" ? "DEEP" : undefined,
+      inputAmount: activeSource.source === "deepbook_quote" ? inputAmount : undefined,
       baselineValue: 0,
       currentValue: 0,
       changePct: 0,
       thresholdPct,
       direction,
       decision: "waiting" satisfies SignalDecision,
-      reason: `DeepBook quote unavailable: ${error}`,
+      reason:
+        activeSource.source === "sui_price"
+          ? `SUI price unavailable: ${error}`
+          : `DeepBook quote unavailable: ${error}`,
       checkedAt,
     })
   }
