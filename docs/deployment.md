@@ -58,7 +58,7 @@ Create a Mandate from `/console` after the package id is updated.
 
 Verify blocked event support:
 
-1. Select the new active Mandate in Run Agent Strategy.
+1. Select the new active Mandate in Automation.
 2. Run `Per-tx guard` or `Budget guard`.
 3. Confirm the result shows `BLOCKED` with a real digest.
 4. Open the digest in SuiVision and confirm `BlockedEvent` was emitted.
