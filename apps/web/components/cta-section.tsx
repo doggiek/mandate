@@ -11,35 +11,26 @@ export function CtaSection() {
 
       <div className="relative mx-auto max-w-3xl px-4 text-center sm:px-6">
         <h2 className="text-balance text-3xl font-medium tracking-tight sm:text-5xl">
-          Give agents authority,
-          <br className="hidden sm:block" /> not your keys
+          Grant authority once.
+          <br className="hidden sm:block" /> Let the agent execute within
+          limits.
         </h2>
         <p className="mx-auto mt-5 max-w-xl text-pretty text-lg leading-relaxed text-muted-foreground">
-          Join the teams building the autonomous economy on Sui with guardrails
-          that hold. Open the Mandate console to run the Agent Wallet flow.
+          Mandate gives an AI agent a capped budget and protocol scope on Sui —
+          then every action is enforced and recorded on-chain.
         </p>
 
-        <form className="mx-auto mt-8 flex max-w-md flex-col gap-3 sm:flex-row">
-          <input
-            type="email"
-            required
-            placeholder="you@company.com"
-            aria-label="Work email"
-            className="h-11 flex-1 rounded-lg border border-border bg-card/70 px-4 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-primary/50 focus:ring-2 focus:ring-primary/20"
-          />
+        <div className="mt-8 flex justify-center">
           <Button
             size="lg"
-            className="group h-11 bg-primary text-primary-foreground hover:bg-primary/90"
+            className="group bg-primary text-primary-foreground hover:bg-primary/90"
             nativeButton={false}
             render={<a href="/console" />}
           >
             Launch Console
             <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
           </Button>
-        </form>
-        <p className="mt-4 font-mono text-xs text-muted-foreground">
-          SOC 2 Type II in progress · Audited by OtterSec
-        </p>
+        </div>
       </div>
     </section>
   )
@@ -50,16 +41,26 @@ export function SiteFooter() {
     <footer className="border-t border-border py-12">
       <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-6 px-4 sm:flex-row sm:px-6">
         <div className="flex items-center gap-2.5">
-          <span className="relative flex size-7 items-center justify-center rounded-md border border-border bg-card">
-            <span className="size-2.5 rounded-[3px] bg-primary" />
-          </span>
-          <span className="font-mono text-sm font-medium">mandate</span>
+          <img
+            src="/brand/mandate-logo-light.png"
+            alt="Mandate"
+            className="h-8 w-8 rounded-lg object-contain"
+          />
+          <span className="text-sm font-semibold">Mandate</span>
         </div>
 
         <nav className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
-          {['Docs', 'SDK', 'Security', 'Pricing', 'Careers'].map((l) => (
-            <a key={l} href="#" className="transition-colors hover:text-foreground">
-              {l}
+          {[
+            { label: 'Docs', href: 'https://github.com/doggiek/mandate#readme' },
+            { label: 'GitHub', href: 'https://github.com/doggiek/mandate' },
+            { label: 'X', href: '#' },
+          ].map((l) => (
+            <a
+              key={l.label}
+              href={l.href}
+              className="transition-colors hover:text-foreground"
+            >
+              {l.label}
             </a>
           ))}
         </nav>

@@ -52,6 +52,7 @@ import {
   IS_LEGACY_POLICY_PACKAGE_ID,
   LEGACY_POLICY_PACKAGE_IDS,
   NETWORK,
+  NETWORK_LABEL,
   PACKAGE_ID,
   PACKAGE_ID_SOURCE,
   PUBLIC_PACKAGE_ID,
@@ -65,7 +66,7 @@ const PROTOCOL_SCOPE_DEEPBOOK = 1;
 const SIGNING_TIMEOUT_MS = 60_000;
 const DUSDC_DECIMALS = 6;
 const TEST_USDC_VAULT_UNAVAILABLE_REASON =
-  "No fillable DeepBook pool on testnet.";
+  "No fillable DeepBook pool on the current network.";
 const EXPIRATION_OPTIONS = [
   { label: "1h", value: "3600000", durationDays: 1 },
   { label: "12h", value: "43200000", durationDays: 1 },
@@ -183,9 +184,7 @@ export function CreateMandateDialog({
     null,
   );
   const [error, setError] = React.useState<string | null>(null);
-  const [network, setNetwork] = React.useState<"mainnet" | "testnet">(
-    NETWORK as "mainnet" | "testnet",
-  );
+  const [network, setNetwork] = React.useState(NETWORK);
 
   const signAndExecute =
     useSignAndExecuteTransaction<SuiTransactionBlockResponse>({
@@ -261,7 +260,7 @@ export function CreateMandateDialog({
     setDigest(null);
     setCreatedMandateId(null);
     setError(null);
-    setNetwork(NETWORK as "mainnet" | "testnet");
+    setNetwork(NETWORK);
   }
 
   function handleOpenChange(nextOpen: boolean) {
@@ -594,8 +593,8 @@ export function CreateMandateDialog({
                 </Select>
                 <FieldDescription>
                   SUI vault is the current executable demo route. DeepBook USDC
-                  vault support is wired but disabled until testnet has a
-                  fillable pool.
+                  vault support is wired but disabled until the current network
+                  has a fillable pool.
                 </FieldDescription>
               </Field>
             </div>
@@ -674,8 +673,8 @@ export function CreateMandateDialog({
 
             <div className="flex items-center gap-2 border-t border-cyan-400/10 pt-4 text-sm">
               <span className="text-muted-foreground">Network:</span>
-              <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-xs font-medium uppercase tracking-wide text-cyan-200">
-                {network}
+              <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-2.5 py-1 text-xs font-medium tracking-wide text-cyan-200">
+                {NETWORK_LABEL}
               </span>
             </div>
 

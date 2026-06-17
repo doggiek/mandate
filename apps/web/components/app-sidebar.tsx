@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/utils"
 import type { ConsoleView } from "@/components/console-shell"
 import Link from "next/link"
+import { NETWORK_LABEL } from "@/lib/chain-config"
 
 const NAV: {
   view: ConsoleView
@@ -66,9 +67,11 @@ export function AppSidebar({
     <Sidebar collapsible="icon" className="border-sidebar-border">
       <SidebarHeader className="border-b border-sidebar-border">
         <div className="flex items-center gap-2.5 px-1.5 py-1.5">
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <ShieldCheck className="size-4.5" />
-          </div>
+          <img
+            src="/brand/mandate-logo-light.png"
+            alt="Mandate"
+            className="h-8 w-8 shrink-0 rounded-lg object-contain"
+          />
           <div className="flex min-w-0 flex-col group-data-[collapsible=icon]:hidden">
             <span className="truncate text-sm font-semibold leading-tight">
               Mandate
@@ -114,7 +117,7 @@ export function AppSidebar({
             <span className="relative inline-flex size-2 rounded-full bg-emerald-400" />
           </span>
           <div className="flex min-w-0 flex-col group-data-[collapsible=icon]:hidden">
-            <span className="truncate text-xs font-medium">Mainnet</span>
+            <span className="truncate text-xs font-medium">{NETWORK_LABEL}</span>
             <span className="truncate text-[11px] text-muted-foreground">
               <Activity className="mr-1 inline size-3 align-[-1px]" />
               Indexer synced

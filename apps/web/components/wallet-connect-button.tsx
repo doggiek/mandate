@@ -74,7 +74,7 @@ export function WalletConnectButton({
         <Wallet data-icon="inline-start" />
         {formatAddress(account.address)}
         {showNetwork && (
-          <span className="ml-1 rounded-full border border-border bg-background/60 px-1.5 py-0.5 font-sans text-[10px] uppercase tracking-wider text-muted-foreground">
+          <span className="ml-1 rounded-full border border-border bg-background/60 px-1.5 py-0.5 font-sans text-[10px] tracking-wider text-muted-foreground">
             {NETWORK_LABEL}
           </span>
         )}
@@ -90,7 +90,7 @@ export function WalletConnectButton({
                 className="text-sm font-medium text-foreground"
               />
             </div>
-            <p className="mt-1 text-xs uppercase tracking-wider text-muted-foreground">
+            <p className="mt-1 text-xs tracking-wider text-muted-foreground">
               Network / {NETWORK_LABEL}
             </p>
             <p className="mt-2 text-xs leading-snug text-muted-foreground">

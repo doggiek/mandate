@@ -1,30 +1,37 @@
-import { User, Cpu, FileCheck2, Boxes } from 'lucide-react'
+import { Bot, FileCheck2, ShieldCheck, Wallet } from 'lucide-react'
 import { SectionLabel } from '@/components/section-label'
 
-const layers = [
+const nodes = [
   {
-    icon: User,
-    title: 'Owner wallet',
-    tag: 'Off-chain',
-    body: 'Your keys, your control. Signs mandates and retains unilateral revocation at all times.',
+    icon: Wallet,
+    title: 'Owner',
+    body: [
+      'Owns the funds.',
+      'Sets the budget, protocol scope, and expiration.',
+      'Can revoke at any time.',
+    ],
   },
   {
-    icon: Cpu,
-    title: 'Agent runtime',
-    tag: 'Off-chain',
-    body: 'The autonomous agent constructs transactions and submits them through the Mandate SDK.',
+    icon: ShieldCheck,
+    title: 'Mandate',
+    highlight: true,
+    body: ['The on-chain authority object.'],
+    labels: ['Budget', 'Scope', 'Expiry', 'Per-tx limits'],
+  },
+  {
+    icon: Bot,
+    title: 'Agent',
+    body: [
+      'Executes autonomously.',
+      'Can act within the mandate, but cannot exceed it.',
+    ],
   },
   {
     icon: FileCheck2,
-    title: 'Policy engine',
-    tag: 'On-chain',
-    body: 'A Sui Move policy object validates every call against budget, DeepBook-only scope, cap, and expiry rules.',
-  },
-  {
-    icon: Boxes,
-    title: 'Sui execution',
-    tag: 'On-chain',
-    body: 'PTBs settle on Sui only after passing policy checks, then execute real DeepBook orders and emit ActivityEvent logs.',
+    title: 'Proof',
+    body: [
+      'Every execution, block, and revocation is recorded on-chain.',
+    ],
   },
 ]
 
@@ -38,39 +45,84 @@ export function Architecture() {
         <div className="max-w-2xl">
           <SectionLabel>Architecture</SectionLabel>
           <h2 className="mt-5 text-balance text-3xl font-medium tracking-tight sm:text-4xl">
-            A thin policy layer between intent and settlement
+            How authority flows?
           </h2>
           <p className="mt-4 text-pretty text-lg leading-relaxed text-muted-foreground">
-            Mandate sits in the transaction path as an on-chain gatekeeper.
-            Built with Sui Move policy objects, PTBs, and real DeepBook execution.
+            Mandate separates ownership, policy, execution, and proof.
+            <br />
+            Execution authority is delegated. Wallet ownership is not.
           </p>
         </div>
 
-        <div className="mt-12 flex flex-col items-stretch gap-3 lg:flex-row lg:items-center">
-          {layers.map((layer, i) => (
-            <div key={layer.title} className="flex items-center gap-3 lg:flex-1">
-              <div className="glass flex-1 rounded-xl border border-border p-5">
-                <div className="flex items-center justify-between">
-                  <span className="flex size-9 items-center justify-center rounded-lg bg-primary/12 text-primary">
-                    <layer.icon className="size-4.5" />
-                  </span>
-                  <span className="rounded-full border border-border bg-secondary px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                    {layer.tag}
-                  </span>
-                </div>
-                <h3 className="mt-4 text-base font-medium">{layer.title}</h3>
-                <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
-                  {layer.body}
-                </p>
-              </div>
-              {i < layers.length - 1 && (
+        <div className="mt-12 grid items-stretch gap-4 sm:grid-cols-2 lg:grid-cols-[1fr_44px_1fr_44px_1fr_44px_1fr] lg:gap-0">
+          {nodes.map((node, index) => {
+            const Icon = node.icon
+
+            return (
+              <div key={node.title} className="contents">
                 <div
-                  aria-hidden
-                  className="hidden h-px w-6 shrink-0 bg-gradient-to-r from-border to-primary/50 lg:block"
-                />
-              )}
-            </div>
-          ))}
+                  className={
+                    node.highlight
+                      ? 'h-full min-h-[240px] rounded-xl border border-primary/30 bg-primary/10 p-5 shadow-xl shadow-primary/5'
+                      : 'h-full min-h-[240px] rounded-xl border border-border bg-card/80 p-5'
+                  }
+                >
+                  <div className="flex items-center justify-between">
+                    <span
+                      className={
+                        node.highlight
+                          ? 'flex size-8 items-center justify-center rounded-lg border border-primary/30 bg-primary/15 text-primary'
+                          : 'flex size-8 items-center justify-center rounded-lg border border-border bg-secondary text-muted-foreground'
+                      }
+                    >
+                      <Icon className="size-4" />
+                    </span>
+                    <span className="font-mono text-xs text-muted-foreground">
+                      0{index + 1}
+                    </span>
+                  </div>
+
+                  <h3 className="mt-4 text-base font-semibold text-foreground">
+                    {node.title}
+                  </h3>
+
+                  {node.highlight ? (
+                    <div className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                      <p>{node.body[0]}</p>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {node.labels?.map((label) => (
+                          <span
+                            key={label}
+                            className="inline-flex rounded-md border border-primary/25 bg-background/35 px-2.5 py-1 font-mono text-xs text-primary"
+                          >
+                            {label}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <ul className="mt-3 space-y-2 text-sm leading-relaxed text-muted-foreground">
+                      {node.body.map((line) => (
+                        <li key={line} className="flex gap-2.5">
+                          <span className="mt-2 size-1.5 shrink-0 rounded-full bg-muted-foreground/45" />
+                          <span>{line}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                {index < nodes.length - 1 && (
+                  <div
+                    aria-hidden
+                    className="hidden items-center justify-center lg:flex"
+                  >
+                    <span className="h-px w-7 bg-primary/45" />
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       </div>
     </section>

@@ -87,7 +87,21 @@ export function formatConfigId(
   return `${value.slice(0, prefixLength)}...${value.slice(-suffixLength)}`;
 }
 
-export const NETWORK_LABEL = NETWORK.toUpperCase();
+export function getSuiNetworkLabel(network: SuiNetwork = NETWORK) {
+  switch (network) {
+    case "mainnet":
+      return "Mainnet";
+    case "devnet":
+      return "Devnet";
+    case "localnet":
+      return "Localnet";
+    case "testnet":
+    default:
+      return "Testnet";
+  }
+}
+
+export const NETWORK_LABEL = getSuiNetworkLabel();
 
 export const IS_LEGACY_POLICY_PACKAGE_ID = LEGACY_POLICY_PACKAGE_IDS.some(
   (packageId) =>

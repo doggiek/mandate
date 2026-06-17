@@ -4,26 +4,26 @@ import { SectionLabel } from '@/components/section-label'
 const controls = [
   {
     icon: Wallet,
-    title: 'Budget ceiling',
-    body: 'Cap total spend over the life of a mandate. Once the ceiling is hit, the agent stops — no overruns, ever.',
+    title: 'Budget',
+    body: 'Cap total spend over the life of a Mandate. Once the ceiling is hit, the agent stops.',
     detail: 'maxBudget: 500 SUI',
   },
   {
     icon: Network,
-    title: 'Protocol restrictions',
-    body: 'Allowlist the exact DeepBook route an agent may interact with. Everything else is rejected on-chain.',
+    title: 'Protocol',
+    body: 'Scope the agent to approved execution routes. Everything else is rejected by policy.',
     detail: 'allow: [DeepBook]',
   },
   {
     icon: Timer,
-    title: 'Expiration time',
-    body: 'Mandates are time-boxed. Authority lapses automatically at expiry with no action required from you.',
+    title: 'Expiration',
+    body: 'Mandates are time-boxed. Authority lapses automatically at expiry.',
     detail: 'expiresAt: 7d',
   },
   {
     icon: Ban,
-    title: 'Owner revocation',
-    body: 'Kill any mandate instantly from your wallet. Revocation is immediate and isolated to a single agent.',
+    title: 'Revocation',
+    body: 'Revoke a Mandate from the Owner wallet and block future agent actions.',
     detail: 'revoke(mandateId)',
   },
 ]
@@ -38,11 +38,11 @@ export function SecurityControls() {
         <div className="max-w-2xl">
           <SectionLabel>Security controls</SectionLabel>
           <h2 className="mt-5 text-balance text-3xl font-medium tracking-tight sm:text-4xl">
-            Least privilege, enforced four ways
+            Four limits. One mandate.
           </h2>
           <p className="mt-4 text-pretty text-lg leading-relaxed text-muted-foreground">
-            Each mandate is a composable set of guarantees the chain upholds for
-            you. Combine them to scope an agent down to exactly what it needs.
+            Budget, protocol, expiration and revocation are enforced by Move
+            objects. Not UI promises.
           </p>
         </div>
 

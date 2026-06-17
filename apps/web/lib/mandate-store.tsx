@@ -54,7 +54,7 @@ export type NewMandateInput = {
   approvalThreshold: number;
   protocols: Protocol[];
   durationDays: number;
-  network: "mainnet" | "testnet";
+  network: Mandate["network"];
   digest?: string;
   ttlMs?: string;
   expiresLabel?: string;

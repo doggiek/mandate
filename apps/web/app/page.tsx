@@ -1,6 +1,7 @@
 import { SiteHeader } from '@/components/site-header'
 import { Hero } from '@/components/hero'
 import { Problem } from '@/components/problem'
+import { UseCase } from '@/components/use-case'
 import { HowItWorks } from '@/components/how-it-works'
 import { Architecture } from '@/components/architecture'
 import { ActivityLog } from '@/components/activity-log'
@@ -14,6 +15,7 @@ export default function Page() {
       <main>
         <Hero />
         <Problem />
+        <UseCase />
         <HowItWorks />
         <Architecture />
         <ActivityLog />

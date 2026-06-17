@@ -3,23 +3,23 @@ import { SectionLabel } from '@/components/section-label'
 const steps = [
   {
     n: '01',
-    title: 'Define a mandate',
-    body: 'Pick an agent and set the rules: a budget ceiling, DeepBook-only protocol scope, a per-transaction cap, and an expiration time.',
+    title: 'Create a Mandate',
+    body: 'Set budget, protocol scope, expiry, and max transaction size.',
   },
   {
     n: '02',
-    title: 'Sign once',
-    body: 'You approve the mandate from your own wallet. Mandate deploys an on-chain policy object — your keys never leave your control.',
+    title: 'Sign Once',
+    body: 'Authorize the Mandate object. Your wallet keys stay with you.',
   },
   {
     n: '03',
-    title: 'Agent transacts',
-    body: 'The agent submits a PTB through the mandate. Every call is checked on-chain before the DeepBook order executes.',
+    title: 'Agent Executes',
+    body: 'The backend agent submits PTBs through the Mandate policy path.',
   },
   {
     n: '04',
-    title: 'Monitor & revoke',
-    body: 'Watch every On-chain ActivityEvent and use Owner revocation to block future agent actions instantly.',
+    title: 'Monitor or Revoke',
+    body: 'Review on-chain activity logs or revoke authority anytime.',
   },
 ]
 
@@ -33,11 +33,11 @@ export function HowItWorks() {
         <div className="max-w-2xl">
           <SectionLabel>How Mandate works</SectionLabel>
           <h2 className="mt-5 text-balance text-3xl font-medium tracking-tight sm:text-4xl">
-            Delegated authority, enforced by the chain
+            Sign once. Execute within limits.
           </h2>
           <p className="mt-4 text-pretty text-lg leading-relaxed text-muted-foreground">
-            Four steps from intent to autonomous execution — with hard limits
-            the agent can never exceed.
+            The owner creates a capped Mandate once. After that, the agent can
+            execute autonomously, but only inside the Move policy object.
           </p>
         </div>
 

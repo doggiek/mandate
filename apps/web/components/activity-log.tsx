@@ -99,18 +99,18 @@ export function ActivityLog() {
           <div>
             <SectionLabel>Activity log</SectionLabel>
             <h2 className="mt-5 text-balance text-3xl font-medium tracking-tight sm:text-4xl">
-              Every agent action, in real time
+              Every action produces proof
             </h2>
             <p className="mt-4 text-pretty text-lg leading-relaxed text-muted-foreground">
-              Mandate streams a complete, on-chain audit trail of what your
-              agents do. Allowed transactions settle instantly; anything that
-              breaks policy is rejected before it touches the chain.
+              Allowed actions execute. Blocked actions are recorded. Both are
+              visible.
             </p>
             <ul className="mt-6 space-y-3 text-sm text-muted-foreground">
               {[
-                'Per-agent attribution and ActivityEvent filtering',
-                'Policy-violation reasons captured inline',
-                'Exportable, verifiable on-chain history',
+                'Execution records',
+                'Policy violations',
+                'Revocations',
+                'On-chain history',
               ].map((item) => (
                 <li key={item} className="flex items-center gap-2.5">
                   <span className="flex size-5 items-center justify-center rounded-full bg-primary/15 text-primary">

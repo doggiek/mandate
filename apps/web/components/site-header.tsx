@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 
 const links = [
   { label: 'Problem', href: '#problem' },
+  { label: 'Use Case', href: '#use-case' },
   { label: 'How it works', href: '#how-it-works' },
   { label: 'Architecture', href: '#architecture' },
   { label: 'Activity', href: '#activity' },
@@ -32,8 +33,8 @@ export function SiteHeader() {
       <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
         <a href="#" className="flex items-center gap-2.5">
           <Logo />
-          <span className="font-mono text-sm font-medium tracking-tight">
-            mandate
+          <span className="text-sm font-semibold tracking-tight">
+            Mandate
           </span>
         </a>
 
@@ -55,7 +56,7 @@ export function SiteHeader() {
             size="sm"
             className="hidden text-muted-foreground hover:text-foreground sm:inline-flex"
             nativeButton={false}
-            render={<a href="#" />}
+            render={<a href="https://github.com/doggiek/mandate#readme" />}
           >
             Docs
           </Button>
@@ -75,8 +76,10 @@ export function SiteHeader() {
 
 function Logo() {
   return (
-    <span className="relative flex size-7 items-center justify-center rounded-md border border-border bg-card">
-      <span className="size-2.5 rounded-[3px] bg-primary" />
-    </span>
+    <img
+      src="/brand/mandate-logo-light.png"
+      alt="Mandate"
+      className="h-8 w-8 rounded-lg object-contain"
+    />
   )
 }

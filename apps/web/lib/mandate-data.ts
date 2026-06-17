@@ -1,4 +1,5 @@
 export type MandateStatus = "active" | "expired" | "revoked"
+export type MandateNetwork = "mainnet" | "testnet" | "devnet" | "localnet"
 
 export type Protocol = "DeepBook" | "Cetus" | "Scallop" | "Aftermath" | "Navi" | "SuiLend"
 
@@ -33,7 +34,7 @@ export type Mandate = {
   txLimit: number
   /** requests requiring approval above this SUI value */
   approvalThreshold: number
-  network: "mainnet" | "testnet"
+  network: MandateNetwork
   budgetCeilingSui?: number
   spentSui?: number
   maxSingleTxSui?: number

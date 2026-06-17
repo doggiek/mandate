@@ -44,7 +44,7 @@ const suiDUSDCPoolId =
   process.env.NEXT_PUBLIC_DEEPBOOK_POOL_ID_SUI_DUSDC ??
   "";
 const TEST_USDC_ROUTE_UNAVAILABLE_REASON =
-  "USDC route unavailable on current DeepBook testnet.";
+  "USDC route unavailable on the current DeepBook network.";
 
 export const TRADING_ROUTES: TradingRoute[] = [
   {
