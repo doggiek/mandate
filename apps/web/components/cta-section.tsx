@@ -1,11 +1,14 @@
-import { ArrowRight } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { ArrowRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
-const COPYRIGHT_YEAR = 2026
+const COPYRIGHT_YEAR = 2026;
 
 export function CtaSection() {
   return (
-    <section id="cta" className="relative border-t border-border py-24 sm:py-32">
+    <section
+      id="cta"
+      className="relative border-t border-border py-24 sm:py-32"
+    >
       <div className="pointer-events-none absolute inset-0 grid-faint [mask-image:radial-gradient(ellipse_50%_60%_at_50%_50%,black,transparent)]" />
       <div className="pointer-events-none absolute left-1/2 top-1/2 size-[480px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary/10 blur-[130px]" />
 
@@ -33,7 +36,7 @@ export function CtaSection() {
         </div>
       </div>
     </section>
-  )
+  );
 }
 
 export function SiteFooter() {
@@ -51,9 +54,12 @@ export function SiteFooter() {
 
         <nav className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
           {[
-            { label: 'Docs', href: 'https://github.com/doggiek/mandate#readme' },
-            { label: 'GitHub', href: 'https://github.com/doggiek/mandate' },
-            { label: 'X', href: '#' },
+            {
+              label: "Docs",
+              href: "https://github.com/doggiek/mandate#readme",
+            },
+            { label: "GitHub", href: "https://github.com/doggiek/mandate" },
+            { label: "X", href: "https://x.com/BuildMandate" },
           ].map((l) => (
             <a
               key={l.label}
@@ -70,5 +76,5 @@ export function SiteFooter() {
         </p>
       </div>
     </footer>
-  )
+  );
 }
