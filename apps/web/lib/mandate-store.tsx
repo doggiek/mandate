@@ -215,13 +215,13 @@ function timestampMs(value: unknown) {
 }
 
 function deriveMandateStatus(mandate: Mandate): Mandate["status"] {
+  if (mandate.status === "revoked") {
+    return "revoked";
+  }
+
   const expiresAt = new Date(mandate.expiresAt).getTime();
   if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
     return "expired";
-  }
-
-  if (mandate.status === "revoked") {
-    return "revoked";
   }
 
   return "active";
@@ -371,10 +371,10 @@ function mapCreatedEventToMandate(
     ? new Date(createdAtMs).toISOString()
     : new Date(0).toISOString();
   const isExpired = new Date(expiresAt).getTime() <= Date.now();
-  const status: Mandate["status"] = isExpired
-    ? "expired"
-    : !isActive
-      ? "revoked"
+  const status: Mandate["status"] = !isActive
+    ? "revoked"
+    : isExpired
+      ? "expired"
       : "active";
   const objectType = moveObjectType(object);
   const asset = assetMetadataFromObjectType(objectType);

@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { AlertCircle, Play, RotateCcw, Square } from "lucide-react";
 import { useCurrentAccount } from "@mysten/dapp-kit";
 
@@ -19,7 +20,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CopyableId, shortId } from "@/components/copyable-id";
 import { ExplorerLink } from "@/components/explorer-link";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -459,6 +459,29 @@ function inactiveMandateStopMessage(
   return "Automation stopped: mandate inactive or expired.";
 }
 
+function automationPolicyStopMessage(reason?: string | null) {
+  const normalized = reason?.trim();
+  if (!normalized) {
+    return "Automation stopped: policy gate blocked execution.";
+  }
+
+  return `Automation stopped: ${normalized}.`;
+}
+
+function isPolicyStopReason(reason?: string | null) {
+  const value = reason?.toLowerCase() ?? "";
+  return (
+    value.includes("policy") ||
+    value.includes("mandate") ||
+    value.includes("revoked") ||
+    value.includes("expired") ||
+    value.includes("inactive") ||
+    value.includes("per-tx") ||
+    value.includes("max tx") ||
+    value.includes("budget")
+  );
+}
+
 function signalSourceLabel(signal: SignalStatus | null) {
   if (!signal) {
     return "signal";
@@ -701,6 +724,7 @@ function formatCountdown(nextRunAt: number | null, nowMs: number) {
 
 export function AgentExecutionPanel() {
   const account = useCurrentAccount();
+  const searchParams = useSearchParams();
   const {
     mandates,
     activity,
@@ -746,6 +770,8 @@ export function AgentExecutionPanel() {
   const loadedScopeRef = React.useRef<string | null>(null);
   const skipNextPersistRef = React.useRef(false);
   const loggedPageLoadedRef = React.useRef(false);
+  const [mandateQueryReady, setMandateQueryReady] = React.useState(false);
+  const mandateLoadingSeenRef = React.useRef(false);
   const automationSessionIdRef = React.useRef(
     typeof crypto !== "undefined" && "randomUUID" in crypto
       ? crypto.randomUUID()
@@ -823,6 +849,12 @@ export function AgentExecutionPanel() {
     return selectableMandates.filter((mandate) => mandate.status === "active");
   }, [selectableMandates]);
 
+  const currentPackageMandates = React.useMemo(() => {
+    return selectableMandates.filter((mandate) =>
+      belongsToCurrentPackage(mandate),
+    );
+  }, [selectableMandates]);
+
   const currentPackageActiveMandates = React.useMemo(() => {
     return activeMandates.filter((mandate) => belongsToCurrentPackage(mandate));
   }, [activeMandates]);
@@ -836,13 +868,37 @@ export function AgentExecutionPanel() {
       ":",
     );
   }, [account?.address]);
+  const urlMandateId = searchParams.get("mandateId");
+
+  React.useEffect(() => {
+    mandateLoadingSeenRef.current = false;
+    setMandateQueryReady(false);
+  }, [ownerPackageScope]);
+
+  React.useEffect(() => {
+    if (!isWalletScoped || !ownerPackageScope) {
+      mandateLoadingSeenRef.current = false;
+      setMandateQueryReady(false);
+      return;
+    }
+
+    if (loading) {
+      mandateLoadingSeenRef.current = true;
+      setMandateQueryReady(false);
+      return;
+    }
+
+    if (mandateLoadingSeenRef.current || currentPackageMandates.length > 0) {
+      setMandateQueryReady(true);
+    }
+  }, [currentPackageMandates.length, isWalletScoped, loading, ownerPackageScope]);
 
   React.useEffect(() => {
     if (loading || selectableMandates.length === 0) {
       return;
     }
 
-    const latest = currentPackageActiveMandates[0];
+    const latestActive = currentPackageActiveMandates[0];
     const stillPresent = selectableMandates.some(
       (mandate) => mandate.id === selectedMandateId,
     );
@@ -857,24 +913,26 @@ export function AgentExecutionPanel() {
           ),
         )
       : null;
-    const savedSelection = currentPackageActiveMandates.find(
+    const savedSelection = currentPackageMandates.find(
       (mandate) => mandate.id === savedSelectedMandateId,
     );
+    const urlSelection = currentPackageMandates.find(
+      (mandate) => mandate.id === urlMandateId,
+    );
 
-    if (
-      !stillPresent ||
-      (latest &&
-        (!belongsToCurrentPackage(currentSelection) ||
-          currentSelection?.status !== "active"))
-    ) {
-      setSelectedMandateId(latest?.id ?? savedSelection?.id ?? null);
+    if (!stillPresent || !belongsToCurrentPackage(currentSelection)) {
+      setSelectedMandateId(
+        urlSelection?.id ?? savedSelection?.id ?? latestActive?.id ?? null,
+      );
     }
   }, [
+    currentPackageMandates,
     currentPackageActiveMandates,
     loading,
     ownerPackageScope,
     selectableMandates,
     selectedMandateId,
+    urlMandateId,
   ]);
 
   React.useEffect(() => {
@@ -1128,11 +1186,18 @@ export function AgentExecutionPanel() {
   const selectedAutoIntervalLabel =
     AUTO_RUN_INTERVALS.find((option) => option.value === autoInterval)?.label ??
     "Off";
-  const showMandateLoading =
-    loading && selectableMandates.length === 0 && !result;
-  const showMandateLoadingState = loading && !selectedMandate;
+  const showMandateLoadingState =
+    isWalletScoped && !mandateQueryReady && !selectedMandate;
   const showEmptyMandateWarning =
-    !loading && !selectedMandate && currentPackageActiveMandates.length === 0;
+    isWalletScoped &&
+    mandateQueryReady &&
+    !selectedMandate &&
+    currentPackageMandates.length === 0;
+  const mandateSelectLabel = selectedMandate
+    ? `${selectedMandate.label} (${shortId(selectedMandate.id)})`
+    : selectedMandateId
+      ? `Loading mandate (${shortId(selectedMandateId)})`
+      : "Select mandate";
   const compactRunStatus = React.useMemo(() => {
     if (isRunning) {
       return "Executing";
@@ -1307,7 +1372,14 @@ export function AgentExecutionPanel() {
 
     const validation = validateRunStrategy(policyStrategy);
     if (!validation.ok) {
-      stopAutoRun("error", validation.reason ?? "Auto Run stopped.");
+      const message = isPolicyStopReason(validation.reason)
+        ? automationPolicyStopMessage(validation.reason)
+        : (validation.reason ?? "Auto Run stopped.");
+      stopAutoRun(
+        "error",
+        message,
+        isPolicyStopReason(validation.reason) ? "blocked" : undefined,
+      );
     }
   }, [autoStatus, policyStrategy, stopAutoRun, validateRunStrategy]);
 
@@ -1689,7 +1761,13 @@ export function AgentExecutionPanel() {
         "blocked",
         validation.reason ?? "Policy blocked automation.",
       );
-      stopAutoRun("error", validation.reason ?? "Auto Run stopped.");
+      stopAutoRun(
+        "error",
+        isPolicyStopReason(validation.reason)
+          ? automationPolicyStopMessage(validation.reason)
+          : (validation.reason ?? "Auto Run stopped."),
+        isPolicyStopReason(validation.reason) ? "blocked" : undefined,
+      );
       return;
     }
 
@@ -1736,7 +1814,8 @@ export function AgentExecutionPanel() {
       setAutoRunCount((count) => count + 1);
       stopAutoRun(
         "stopped",
-        "Policy block recorded on-chain. Auto Run stopped before another DeepBook submission.",
+        "Automation stopped: policy gate blocked execution.",
+        "blocked",
       );
       return;
     }
@@ -1858,19 +1937,16 @@ export function AgentExecutionPanel() {
           setAutoLastDigest(outcome.result.digest);
         }
         setAutoRunCount((count) => count + 1);
-        const inactiveStopMessage =
+        const blockedStopMessage =
           policyStrategy === "revoked_expired"
             ? inactiveMandateStopMessage(selectedMandate)
-            : "Auto Run stopped.";
+            : automationPolicyStopMessage(reason);
         stopAutoRun(
           outcome.result?.status === "BLOCKED" ? "stopped" : "error",
           outcome.result?.status === "BLOCKED"
-            ? inactiveStopMessage
+            ? blockedStopMessage
             : (outcome.error ?? "Auto Run failed."),
-          outcome.result?.status === "BLOCKED" &&
-            policyStrategy === "revoked_expired"
-            ? "blocked"
-            : undefined,
+          outcome.result?.status === "BLOCKED" ? "blocked" : undefined,
         );
       });
       return;
@@ -1979,109 +2055,90 @@ export function AgentExecutionPanel() {
               Trading Agent executes within these on-chain limits.
             </p>
           </div>
-          {showMandateLoading ? (
-            <div className="rounded-lg border border-border bg-background/60 p-3">
-              <Skeleton className="h-9 w-full" />
-            </div>
-          ) : (
-            selectableMandates.length > 0 && (
-              <div className="rounded-lg border border-border bg-background/60 p-3">
-                <Select
-                  value={selectedMandateId ?? ""}
-                  onValueChange={handleMandateChange}
+          <div className="rounded-lg border border-border bg-background/60 p-3">
+            {selectableMandates.length > 0 ? (
+              <Select
+                value={selectedMandateId ?? ""}
+                onValueChange={handleMandateChange}
+              >
+                <SelectTrigger className="h-auto w-full border-primary/20 bg-primary/5 py-2">
+                  <span className="min-w-0 truncate text-left text-sm font-medium">
+                    {mandateSelectLabel}
+                  </span>
+                </SelectTrigger>
+                <SelectContent
+                  align="start"
+                  className="w-[min(560px,calc(100vw-2rem))]"
                 >
-                  <SelectTrigger className="h-auto w-full border-primary/20 bg-primary/5 py-2">
-                    <span className="min-w-0 truncate text-left text-sm font-medium">
-                      {selectedMandate
-                        ? `${selectedMandate.label} (${shortId(selectedMandate.id)})`
-                        : currentPackageActiveMandates.length === 0
-                          ? "No current-package active mandate"
-                          : "Select mandate"}
-                    </span>
-                  </SelectTrigger>
-                  <SelectContent
-                    align="start"
-                    className="w-[min(560px,calc(100vw-2rem))]"
-                  >
-                    <SelectGroup>
-                      {selectableMandates.map((mandate) => (
-                        <SelectItem
-                          key={mandate.id}
-                          value={mandate.id}
-                          className="py-2"
-                        >
-                          <span className="flex min-w-0 items-start gap-2">
-                            <span
-                              className={cn(
-                                "mt-1.5 size-2 shrink-0 rounded-full",
-                                mandateStatusDot(mandate.status),
-                              )}
-                            />
-                            <span className="flex min-w-0 flex-col gap-1">
-                              <span className="truncate font-medium">
-                                {mandate.label}
+                  <SelectGroup>
+                    {selectableMandates.map((mandate) => (
+                      <SelectItem
+                        key={mandate.id}
+                        value={mandate.id}
+                        className="py-2"
+                      >
+                        <span className="flex min-w-0 items-start gap-2">
+                          <span
+                            className={cn(
+                              "mt-1.5 size-2 shrink-0 rounded-full",
+                              mandateStatusDot(mandate.status),
+                            )}
+                          />
+                          <span className="flex min-w-0 flex-col gap-1">
+                            <span className="truncate font-medium">
+                              {mandate.label}
+                            </span>
+                            <span className="truncate text-xs text-muted-foreground">
+                              <span className="font-mono">
+                                {shortId(mandate.id)}
                               </span>
-                              <span className="truncate text-xs text-muted-foreground">
-                                <span className="font-mono">
-                                  {shortId(mandate.id)}
-                                </span>
-                                {" · "}
-                                <span className="capitalize">
-                                  {mandate.status}
-                                </span>
-                                {!belongsToCurrentPackage(mandate) &&
-                                  " · old package"}
-                                {" · "}Budget {formatSui(mandate.budget)}
-                                {" · "}Max {formatSui(mandate.txLimit)}
-                                {" · "}Created {mandate.createdAtDisplay ?? "-"}
-                                {" · "}Expires {mandateExpiryLabel(mandate)}
+                              {" · "}
+                              <span className="capitalize">
+                                {mandate.status}
                               </span>
+                              {!belongsToCurrentPackage(mandate) &&
+                                " · old package"}
+                              {" · "}Budget {formatSui(mandate.budget)}
+                              {" · "}Max {formatSui(mandate.txLimit)}
+                              {" · "}Created {mandate.createdAtDisplay ?? "-"}
+                              {" · "}Expires {mandateExpiryLabel(mandate)}
                             </span>
                           </span>
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            ) : (
+              <div className="flex min-h-9 w-full items-center rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm font-medium text-muted-foreground">
+                {mandateSelectLabel}
               </div>
-            )
-          )}
+            )}
+          </div>
 
-          {showMandateLoading ? (
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
-              {Array.from({ length: 7 }).map((_, index) => (
-                <Skeleton key={index} className="h-[58px] rounded-lg" />
-              ))}
-            </div>
-          ) : (
-            selectedMandate && (
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
-                {mandateSummary.map((item) => (
-                  <SummaryChip
-                    key={item.label}
-                    label={item.label}
-                    value={
-                      item.copyable && item.value ? (
-                        <CopyableId
-                          value={item.value}
-                          label={item.label.toLowerCase()}
-                        />
-                      ) : (
-                        (item.value ?? "-")
-                      )
-                    }
-                    mono={
-                      item.label === "Agent Wallet" ||
-                      item.label === "Mandate ID"
-                    }
-                    title={
-                      typeof item.value === "string" ? item.value : undefined
-                    }
-                  />
-                ))}
-              </div>
-            )
-          )}
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
+            {mandateSummary.map((item) => (
+              <SummaryChip
+                key={item.label}
+                label={item.label}
+                value={
+                  item.copyable && item.value ? (
+                    <CopyableId
+                      value={item.value}
+                      label={item.label.toLowerCase()}
+                    />
+                  ) : (
+                    (item.value ?? "-")
+                  )
+                }
+                mono={
+                  item.label === "Agent Wallet" || item.label === "Mandate ID"
+                }
+                title={typeof item.value === "string" ? item.value : undefined}
+              />
+            ))}
+          </div>
 
           {selectedMandate && !agentWalletMatches && (
             <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-100">
