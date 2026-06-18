@@ -8,7 +8,15 @@ import type {
   SuiObjectResponse,
   SuiTransactionBlockResponse,
 } from "@mysten/sui/jsonRpc"
-import { NETWORK, PACKAGE_ID, getRpcUrl } from "@/lib/chain-config"
+import {
+  NETWORK,
+  PACKAGE_ID,
+  PACKAGE_ID_SOURCE,
+  getRpcUrl,
+  type SuiNetwork,
+} from "@/lib/chain-config"
+
+const PACKAGE_ID_PATTERN = /^0x[a-fA-F0-9]{64}$/
 
 export const MANDATE_EVENT_TYPES = {
   created: `${PACKAGE_ID}::mandate::CreatedEvent`,
@@ -20,9 +28,38 @@ export const MANDATE_EVENT_TYPES = {
 } as const
 
 let rpcClient: SuiJsonRpcClient | null = null
+let loggedRpcConfig = false
+
+function networkPackageEnvName(network: SuiNetwork) {
+  return `NEXT_PUBLIC_PACKAGE_ID_${network.toUpperCase()}`
+}
+
+function assertPackageConfig() {
+  if (!PACKAGE_ID) {
+    throw new Error(`Missing ${networkPackageEnvName(NETWORK)}`)
+  }
+
+  if (!PACKAGE_ID_PATTERN.test(PACKAGE_ID)) {
+    throw new Error(
+      `Invalid ${networkPackageEnvName(NETWORK)}: expected a 32-byte 0x package id.`
+    )
+  }
+}
 
 export function getSuiRpcClient() {
+  assertPackageConfig()
+
   if (!rpcClient) {
+    if (process.env.NODE_ENV !== "production" && !loggedRpcConfig) {
+      console.info("[MANDATE] RPC config", {
+        network: NETWORK,
+        rpcUrl: getRpcUrl(),
+        packageId: PACKAGE_ID,
+        packageIdSource: PACKAGE_ID_SOURCE,
+      })
+      loggedRpcConfig = true
+    }
+
     rpcClient = new SuiJsonRpcClient({
       network: NETWORK,
       url: getRpcUrl(),
@@ -44,6 +81,8 @@ function eventOwner(event: SuiEvent) {
 }
 
 async function queryEventsByType(type: string) {
+  assertPackageConfig()
+
   const response = await getSuiRpcClient().queryEvents({
     query: { MoveEventType: type },
     limit: 50,

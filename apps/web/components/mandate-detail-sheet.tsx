@@ -227,6 +227,7 @@ export function MandateDetailSheet({
   const [isWithdrawing, setWithdrawing] = React.useState(false);
   const [revokeError, setRevokeError] = React.useState<string | null>(null);
   const [withdrawError, setWithdrawError] = React.useState<string | null>(null);
+  const sheetContentRef = React.useRef<HTMLDivElement | null>(null);
   const sheetBodyRef = React.useRef<HTMLDivElement | null>(null);
   const revokeConfirmRef = React.useRef<HTMLElement | null>(null);
   const closeTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(
@@ -254,6 +255,9 @@ export function MandateDetailSheet({
       closeTimeoutRef.current = null;
     }
     sheetBodyRef.current?.scrollTo({ top: 0 });
+    window.requestAnimationFrame(() => {
+      sheetContentRef.current?.focus({ preventScroll: true });
+    });
   }, [mandateId]);
 
   React.useEffect(() => {
@@ -322,6 +326,12 @@ export function MandateDetailSheet({
     isOwnerWallet;
   const isWithdrawn =
     Boolean(mandate) && (mandate?.isWithdrawn || remaining <= 0);
+  const fundsStatusLabel =
+    isWithdrawn || remaining <= 0
+      ? "Returned"
+      : mandate?.status === "active"
+        ? "Vaulted"
+        : "Withdrawable";
 
   const signAndExecute =
     useSignAndExecuteTransaction<SuiTransactionBlockResponse>({
@@ -490,7 +500,11 @@ export function MandateDetailSheet({
       open={Boolean(mandateId)}
       onOpenChange={onOpenChange}
     >
-      <SheetContent className="!fixed !right-0 !top-0 z-50 !h-screen w-full overflow-hidden border-border bg-background/95 p-0 backdrop-blur-xl sm:max-w-xl">
+      <SheetContent
+        ref={sheetContentRef}
+        tabIndex={-1}
+        className="!fixed !right-0 !top-0 z-50 !h-screen w-full overflow-hidden border-border bg-background/95 p-0 backdrop-blur-xl focus:outline-none sm:max-w-xl"
+      >
         {mandate ? (
           <>
             <SheetHeader className="shrink-0 border-b border-border p-5">
@@ -841,20 +855,33 @@ export function MandateDetailSheet({
                     </div>
                   </Alert>
                 ) : (
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
+                  <div className="flex flex-col gap-4">
+                    <div className="flex items-center justify-between gap-3">
                       <h3 className="text-sm font-medium">Owner controls</h3>
-                      <p className="mt-1 text-xs text-muted-foreground">
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "shrink-0 font-normal",
+                          remaining > 0
+                            ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
+                            : "border-cyan-500/25 bg-cyan-500/10 text-cyan-300",
+                        )}
+                      >
+                        {fundsStatusLabel}
+                      </Badge>
+                    </div>
+                    <p className="text-xs leading-relaxed text-muted-foreground">
                         {mandate.status === "active"
                           ? "Revocation is signed by the owner wallet. Remaining vault funds are withdrawn back to the owner."
-                          : isWithdrawn
-                            ? "No remaining vault funds are available to withdraw."
-                            : "Expired or revoked mandate vault funds can be withdrawn by the owner wallet."}
-                      </p>
-                    </div>
+                          : canWithdraw
+                            ? "Remaining vault funds can be withdrawn by the owner wallet."
+                            : "No remaining vault funds are available to withdraw."}
+                    </p>
+                    <div className="flex justify-end">
                     {mandate.status === "active" ? (
                       <Button
                         variant="destructive"
+                        size="sm"
                         disabled={!canRevoke || isRevoking}
                         onClick={() => setConfirmingRevoke(true)}
                         title={
@@ -870,22 +897,21 @@ export function MandateDetailSheet({
                     ) : canWithdraw ? (
                       <Button
                         variant="default"
+                        size="sm"
                         disabled={isWithdrawing}
                         onClick={handleWithdraw}
                         title="Withdraw remaining vault funds back to the owner wallet"
                       >
                         {isWithdrawing
                           ? "Withdrawing"
-                          : "Withdraw Remaining Funds"}
+                          : "Withdraw"}
                       </Button>
                     ) : (
-                      <Badge
-                        variant="outline"
-                        className="border-cyan-500/25 bg-cyan-500/10 text-cyan-300"
-                      >
-                        {isWithdrawn ? "Withdrawn" : "No withdrawable funds"}
-                      </Badge>
+                      <p className="text-sm text-muted-foreground">
+                        No actions available.
+                      </p>
                     )}
+                    </div>
                   </div>
                 )}
               </section>

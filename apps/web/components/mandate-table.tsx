@@ -21,10 +21,42 @@ import {
   normalizeSuiAddress,
 } from "@/lib/chain-config";
 import type { Mandate } from "@/lib/mandate-data";
-import { ChevronRight, ShieldOff } from "lucide-react";
+import { ChevronRight, ShieldOff, WalletCards } from "lucide-react";
 
 const OLD_PACKAGE_MESSAGE =
   "This mandate was created by an older package. Create a new mandate with the latest package to revoke or test policy actions.";
+
+function FundsBadge({
+  status,
+  remainingVaultBalance,
+  isWithdrawn,
+}: {
+  status: Mandate["status"];
+  remainingVaultBalance: number;
+  isWithdrawn?: boolean;
+}) {
+  const label =
+    isWithdrawn || remainingVaultBalance <= 0
+      ? "Returned"
+      : status === "active"
+        ? "Vaulted"
+        : "Withdrawable";
+  const isReturned = label === "Returned";
+
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        "font-normal",
+        isReturned
+          ? "border-cyan-500/25 bg-cyan-500/10 text-cyan-300"
+          : "border-emerald-500/25 bg-emerald-500/10 text-emerald-400",
+      )}
+    >
+      {label}
+    </Badge>
+  );
+}
 
 export function MandateTable({
   mandates,
@@ -44,6 +76,7 @@ export function MandateTable({
           <TableRow className="border-border hover:bg-transparent">
             <TableHead className="pl-4">Mandate</TableHead>
             <TableHead>Status</TableHead>
+            <TableHead>Funds</TableHead>
             <TableHead className="w-[160px]">Budget used</TableHead>
             <TableHead className="hidden md:table-cell">Protocols</TableHead>
             <TableHead className="hidden lg:table-cell">Created</TableHead>
@@ -65,7 +98,6 @@ export function MandateTable({
             const canRevoke = !isKnownOlderPackage && isOwnerWallet;
             const remainingVaultBalance =
               m.remainingVaultBalance ?? Math.max(m.budget - m.spent, 0);
-            const isWithdrawn = m.isWithdrawn || remainingVaultBalance <= 0;
             const canOpenWithdraw =
               m.status !== "active" && remainingVaultBalance > 0;
 
@@ -79,21 +111,19 @@ export function MandateTable({
                   <div className="flex flex-col gap-0.5">
                     <span className="font-medium leading-tight">{m.label}</span>
                     <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      {m.agentAddress ? (
-                        <CopyableId
-                          value={m.agentAddress}
-                          label="agent wallet"
-                        />
-                      ) : (
-                        <span className="truncate">Agent Wallet</span>
-                      )}
-                      <span className="text-border">·</span>
                       <CopyableId value={m.id} label="mandate id" />
                     </span>
                   </div>
                 </TableCell>
                 <TableCell>
                   <StatusBadge status={m.status} />
+                </TableCell>
+                <TableCell>
+                  <FundsBadge
+                    status={m.status}
+                    remainingVaultBalance={remainingVaultBalance}
+                    isWithdrawn={m.isWithdrawn}
+                  />
                 </TableCell>
                 <TableCell>
                   <BudgetMeter
@@ -176,15 +206,11 @@ export function MandateTable({
                           }}
                           title="Open details to withdraw remaining vault funds"
                         >
+                          <WalletCards data-icon="inline-start" />
                           Withdraw
                         </Button>
                       ) : (
-                        <Badge
-                          variant="outline"
-                          className="border-cyan-500/25 bg-cyan-500/10 text-cyan-300"
-                        >
-                          {isWithdrawn ? "Withdrawn" : "No funds"}
-                        </Badge>
+                        <span className="text-sm text-muted-foreground">-</span>
                       )
                     )}
                     <ChevronRight className="size-4 text-muted-foreground" />

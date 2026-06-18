@@ -107,6 +107,7 @@ function OverviewMandatesTable({
           <TableRow className="border-border/70 hover:bg-transparent">
             <TableHead className="pl-4">Mandate</TableHead>
             <TableHead>Status</TableHead>
+            <TableHead>Funds</TableHead>
             <TableHead className="w-[160px]">Budget used</TableHead>
             <TableHead className="hidden md:table-cell">Protocols</TableHead>
             <TableHead className="hidden lg:table-cell">Created</TableHead>
@@ -117,94 +118,120 @@ function OverviewMandatesTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {mandates.map((mandate) => (
-            <TableRow key={mandate.id} className="border-border/70">
-              <TableCell className="pl-4">
-                <div className="flex min-w-0 flex-col gap-0.5">
-                  <span className="truncate font-medium leading-tight">
-                    {mandate.label}
-                  </span>
-                  <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                    <CopyableId value={mandate.id} label="mandate id" />
-                  </span>
-                </div>
-              </TableCell>
-              <TableCell>
-                <StatusBadge status={mandate.status} />
-              </TableCell>
-              <TableCell>
-                <BudgetMeter
-                  spent={mandate.spent}
-                  budget={mandate.budget}
-                  symbol={mandate.assetSymbol ?? "SUI"}
-                />
-              </TableCell>
-              <TableCell className="hidden md:table-cell">
-                <div className="flex flex-wrap gap-1">
-                  {mandate.protocols.slice(0, 2).map((protocol) => (
-                    <Badge
-                      key={protocol}
-                      variant="secondary"
-                      className="bg-secondary font-normal text-secondary-foreground"
-                    >
-                      {protocol}
-                    </Badge>
-                  ))}
-                  {mandate.protocols.length > 2 && (
-                    <Badge
-                      variant="secondary"
-                      className="bg-secondary font-normal"
-                    >
-                      +{mandate.protocols.length - 2}
-                    </Badge>
-                  )}
-                </div>
-              </TableCell>
-              <TableCell className="hidden lg:table-cell">
-                <span className="text-sm text-muted-foreground tabular-nums">
-                  {mandate.createdAtDisplay ?? "-"}
-                </span>
-              </TableCell>
-              <TableCell className="hidden lg:table-cell">
-                <span
+          {mandates.map((mandate) => {
+            const remainingVaultBalance =
+              mandate.remainingVaultBalance ??
+              Math.max(mandate.budget - mandate.spent, 0);
+            const fundsLabel =
+              mandate.isWithdrawn || remainingVaultBalance <= 0
+                ? "Returned"
+                : mandate.status === "active"
+                  ? "Vaulted"
+                  : "Withdrawable";
+            const fundsReturned = fundsLabel === "Returned";
+
+            return (
+              <TableRow key={mandate.id} className="border-border/70">
+                <TableCell className="pl-4">
+                  <div className="flex min-w-0 flex-col gap-0.5">
+                    <span className="truncate font-medium leading-tight">
+                      {mandate.label}
+                    </span>
+                    <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                      <CopyableId value={mandate.id} label="mandate id" />
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <StatusBadge status={mandate.status} />
+                </TableCell>
+                <TableCell>
+                <Badge
+                  variant="outline"
                   className={cn(
-                    "text-sm tabular-nums",
-                    mandate.status === "expired"
-                      ? "text-muted-foreground"
-                      : "text-foreground",
+                    "font-normal",
+                    fundsReturned
+                      ? "border-cyan-500/25 bg-cyan-500/10 text-cyan-300"
+                      : "border-emerald-500/25 bg-emerald-500/10 text-emerald-400",
                   )}
                 >
-                  {mandate.expiresLabel ??
-                    stableExpiryLabel(mandate.expiresAt, mandate.status)}
-                </span>
-              </TableCell>
-              <TableCell className="pr-3 text-right">
-                <div className="flex items-center justify-end gap-2">
-                  <Link
-                    href={`/console/automation?mandateId=${mandate.id}`}
-                    className={buttonVariants({
-                      variant: "outline",
-                      size: "sm",
-                      className: "h-8 gap-1.5",
-                    })}
+                  {fundsLabel}
+                </Badge>
+                </TableCell>
+                <TableCell>
+                  <BudgetMeter
+                    spent={mandate.spent}
+                    budget={mandate.budget}
+                    symbol={mandate.assetSymbol ?? "SUI"}
+                  />
+                </TableCell>
+                <TableCell className="hidden md:table-cell">
+                  <div className="flex flex-wrap gap-1">
+                    {mandate.protocols.slice(0, 2).map((protocol) => (
+                      <Badge
+                        key={protocol}
+                        variant="secondary"
+                        className="bg-secondary font-normal text-secondary-foreground"
+                      >
+                        {protocol}
+                      </Badge>
+                    ))}
+                    {mandate.protocols.length > 2 && (
+                      <Badge
+                        variant="secondary"
+                        className="bg-secondary font-normal"
+                      >
+                        +{mandate.protocols.length - 2}
+                      </Badge>
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell className="hidden lg:table-cell">
+                  <span className="text-sm text-muted-foreground tabular-nums">
+                    {mandate.createdAtDisplay ?? "-"}
+                  </span>
+                </TableCell>
+                <TableCell className="hidden lg:table-cell">
+                  <span
+                    className={cn(
+                      "text-sm tabular-nums",
+                      mandate.status === "expired"
+                        ? "text-muted-foreground"
+                        : "text-foreground",
+                    )}
                   >
-                    Automation
-                    <ArrowRight data-icon="inline-end" />
-                  </Link>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="size-8"
-                    onClick={() => onSelect(mandate.id)}
-                    aria-label={`Open ${mandate.label} details`}
-                  >
-                    <ChevronRight className="size-4" />
-                  </Button>
-                </div>
-              </TableCell>
-            </TableRow>
-          ))}
+                    {mandate.expiresLabel ??
+                      stableExpiryLabel(mandate.expiresAt, mandate.status)}
+                  </span>
+                </TableCell>
+                <TableCell className="pr-3 text-right">
+                  <div className="flex items-center justify-end gap-2">
+                    <Link
+                      href={`/console/automation?mandateId=${mandate.id}`}
+                      className={buttonVariants({
+                        variant: "outline",
+                        size: "sm",
+                        className: "h-8 gap-1.5",
+                      })}
+                    >
+                      Automation
+                      <ArrowRight data-icon="inline-end" />
+                    </Link>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="size-8"
+                      onClick={() => onSelect(mandate.id)}
+                      aria-label={`Open ${mandate.label} details`}
+                    >
+                      <ChevronRight className="size-4" />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </div>

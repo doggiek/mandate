@@ -44,6 +44,7 @@ export type Mandate = {
   remainingVaultBalance?: number
   isWithdrawable?: boolean
   isWithdrawn?: boolean
+  isRevokedOnChain?: boolean
 }
 
 export type ActivityKind =

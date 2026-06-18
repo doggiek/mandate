@@ -219,7 +219,7 @@ function RunSetupField({
       <span className="truncate text-xs text-muted-foreground">{label}</span>
       <span
         className={cn(
-          "min-w-0 truncate text-[15px] font-medium text-foreground",
+          "min-w-0 truncate text-[13px] font-medium text-foreground",
           mono && "font-mono",
         )}
         title={title}
@@ -447,9 +447,9 @@ function policyBlockedDetail(
   return "Move policy rejected the agent action";
 }
 
-function inactiveMandateStopMessage(
-  mandate?: { status: "active" | "expired" | "revoked" },
-) {
+function inactiveMandateStopMessage(mandate?: {
+  status: "active" | "expired" | "revoked";
+}) {
   if (mandate?.status === "revoked") {
     return "Automation stopped: mandate revoked.";
   }
@@ -891,7 +891,12 @@ export function AgentExecutionPanel() {
     if (mandateLoadingSeenRef.current || currentPackageMandates.length > 0) {
       setMandateQueryReady(true);
     }
-  }, [currentPackageMandates.length, isWalletScoped, loading, ownerPackageScope]);
+  }, [
+    currentPackageMandates.length,
+    isWalletScoped,
+    loading,
+    ownerPackageScope,
+  ]);
 
   React.useEffect(() => {
     if (loading || selectableMandates.length === 0) {
@@ -2292,14 +2297,6 @@ export function AgentExecutionPanel() {
                 Trigger
               </div>
               <div className="mt-3 space-y-2">
-                <RunSetupField
-                  label="Signal market"
-                  value={
-                    selectedTradingRoute?.signal.market ??
-                    selectedSignalStrategy.market
-                  }
-                  mono
-                />
                 <div className="grid grid-cols-[104px_minmax(0,1fr)] items-center gap-3 py-1.5">
                   <span className="truncate text-xs text-muted-foreground">
                     Threshold
@@ -2354,6 +2351,14 @@ export function AgentExecutionPanel() {
                     </SelectContent>
                   </Select>
                 </div>
+                <RunSetupField
+                  label="Signal market"
+                  value={
+                    selectedTradingRoute?.signal.market ??
+                    selectedSignalStrategy.market
+                  }
+                  mono
+                />
               </div>
             </div>
 

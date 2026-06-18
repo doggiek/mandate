@@ -214,14 +214,22 @@ function timestampMs(value: unknown) {
   return undefined;
 }
 
+function isMandateExpired(mandate: Pick<Mandate, "expiresAt">) {
+  const expiresAt = new Date(mandate.expiresAt).getTime();
+  return Number.isFinite(expiresAt) && expiresAt <= Date.now();
+}
+
 function deriveMandateStatus(mandate: Mandate): Mandate["status"] {
-  if (mandate.status === "revoked") {
+  if (mandate.isRevokedOnChain) {
     return "revoked";
   }
 
-  const expiresAt = new Date(mandate.expiresAt).getTime();
-  if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
+  if (isMandateExpired(mandate)) {
     return "expired";
+  }
+
+  if (mandate.status === "revoked") {
+    return "revoked";
   }
 
   return "active";
@@ -370,12 +378,11 @@ function mapCreatedEventToMandate(
   const createdAt = createdAtMs
     ? new Date(createdAtMs).toISOString()
     : new Date(0).toISOString();
-  const isExpired = new Date(expiresAt).getTime() <= Date.now();
-  const status: Mandate["status"] = !isActive
-    ? "revoked"
-    : isExpired
-      ? "expired"
-      : "active";
+  const status: Mandate["status"] = isMandateExpired({ expiresAt })
+    ? "expired"
+    : isActive
+      ? "active"
+      : "revoked";
   const objectType = moveObjectType(object);
   const asset = assetMetadataFromObjectType(objectType);
   const amountDecimals = asset.assetDecimals;
@@ -427,6 +434,7 @@ function mapCreatedEventToMandate(
     remainingVaultBalance,
     isWithdrawable: status !== "active" && remainingVaultBalance > 0,
     isWithdrawn: remainingVaultBalance <= 0,
+    isRevokedOnChain: false,
   };
 }
 
@@ -1176,8 +1184,19 @@ export function MandateStoreProvider({
               mandateIds.map((id) => queryMandateWithdrawEvents(id)),
             ).then((pages) => pages.flat()),
           ]);
+        const revokedMandateIds = new Set(
+          revokeEvents
+            .map(eventMandateId)
+            .filter((id): id is string => Boolean(id)),
+        );
+        const rpcMandates = createdMandates.map((mandate) =>
+          normalizeMandateStatus({
+            ...mandate,
+            isRevokedOnChain: revokedMandateIds.has(mandate.id),
+          }),
+        );
         const mandateByIdForEvents = new Map(
-          createdMandates.map((mandate) => [mandate.id, mandate]),
+          rpcMandates.map((mandate) => [mandate.id, mandate]),
         );
         const allRpcEvents = [
           ...createdEvents,
@@ -1213,7 +1232,7 @@ export function MandateStoreProvider({
         );
 
         if (!cancelled) {
-          setRpcMandates(uniqById(createdMandates));
+          setRpcMandates(uniqById(rpcMandates));
           setRpcActivity(rpcActivities);
         }
       } catch (caught) {
@@ -1331,6 +1350,7 @@ export function MandateStoreProvider({
                 remainingVaultBalance: 0,
                 isWithdrawable: false,
                 isWithdrawn: true,
+                isRevokedOnChain: true,
               }
             : m,
         );
@@ -1346,6 +1366,7 @@ export function MandateStoreProvider({
                 remainingVaultBalance: 0,
                 isWithdrawable: false,
                 isWithdrawn: true,
+                isRevokedOnChain: true,
               }
             : m,
         ),
