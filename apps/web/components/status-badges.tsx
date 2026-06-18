@@ -69,6 +69,10 @@ const ACTIVITY_STYLES: Record<ActivityKind, { label: string; className: string }
     label: "Revoked",
     className: "border-destructive/30 bg-destructive/10 text-destructive",
   },
+  "mandate.withdrawn": {
+    label: "Withdrawn",
+    className: "border-cyan-500/25 bg-cyan-500/10 text-cyan-300",
+  },
 }
 
 export function ActivityBadge({ kind }: { kind: ActivityKind }) {

@@ -41,6 +41,9 @@ export type Mandate = {
   protocol?: Protocol
   expiresLabel?: string
   createdAtDisplay?: string
+  remainingVaultBalance?: number
+  isWithdrawable?: boolean
+  isWithdrawn?: boolean
 }
 
 export type ActivityKind =
@@ -48,6 +51,7 @@ export type ActivityKind =
   | "tx.blocked"
   | "mandate.created"
   | "mandate.revoked"
+  | "mandate.withdrawn"
 
 export type ActivityEvent = {
   id: string

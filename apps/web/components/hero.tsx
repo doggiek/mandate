@@ -1,35 +1,35 @@
-'use client'
+"use client";
 
-import { useEffect, useState } from 'react'
-import { ArrowRight, Play, ShieldCheck } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { useEffect, useState } from "react";
+import { ArrowRight, Play, ShieldCheck } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
-const ORDER_SIZE_SUI = 30
-const MAX_EXECUTIONS = 16
-const BUDGET_SUI = 500
-const FINAL_EXECUTED_VOLUME = ORDER_SIZE_SUI * MAX_EXECUTIONS
+const ORDER_SIZE_SUI = 30;
+const MAX_EXECUTIONS = 16;
+const BUDGET_SUI = 500;
+const FINAL_EXECUTED_VOLUME = ORDER_SIZE_SUI * MAX_EXECUTIONS;
 
 type HeroStats = {
-  executedVolume: number
-  executions: number
-  blocked: number
-  rejected: boolean
-}
+  executedVolume: number;
+  executions: number;
+  blocked: number;
+  rejected: boolean;
+};
 
 function getAnimatedStats(): HeroStats {
-  const cycleMs = 9000
-  const elapsed = Date.now() % cycleMs
-  const phase = elapsed / cycleMs
-  const executionProgress = Math.min(phase / 0.72, 1)
-  const executions = Math.floor(MAX_EXECUTIONS * executionProgress)
-  const blocked = phase > 0.76 ? 1 : 0
+  const cycleMs = 9000;
+  const elapsed = Date.now() % cycleMs;
+  const phase = elapsed / cycleMs;
+  const executionProgress = Math.min(phase / 0.72, 1);
+  const executions = Math.floor(MAX_EXECUTIONS * executionProgress);
+  const blocked = phase > 0.76 ? 1 : 0;
 
   return {
     executedVolume: executions * ORDER_SIZE_SUI,
     executions,
     blocked,
     rejected: blocked === 1,
-  }
+  };
 }
 
 const FINAL_STATS: HeroStats = {
@@ -37,28 +37,28 @@ const FINAL_STATS: HeroStats = {
   executions: MAX_EXECUTIONS,
   blocked: 1,
   rejected: false,
-}
+};
 
 export function Hero() {
-  const [stats, setStats] = useState<HeroStats>(FINAL_STATS)
+  const [stats, setStats] = useState<HeroStats>(FINAL_STATS);
 
   useEffect(() => {
     const prefersReducedMotion = window.matchMedia(
-      '(prefers-reduced-motion: reduce)',
-    ).matches
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
 
     if (prefersReducedMotion) {
-      setStats(FINAL_STATS)
-      return
+      setStats(FINAL_STATS);
+      return;
     }
 
-    setStats(getAnimatedStats())
+    setStats(getAnimatedStats());
     const interval = window.setInterval(() => {
-      setStats(getAnimatedStats())
-    }, 160)
+      setStats(getAnimatedStats());
+    }, 160);
 
-    return () => window.clearInterval(interval)
-  }, [])
+    return () => window.clearInterval(interval);
+  }, []);
 
   return (
     <section className="relative overflow-hidden pb-20 pt-32 sm:pb-28 sm:pt-40">
@@ -73,19 +73,19 @@ export function Hero() {
           </div>
 
           <h1 className="mt-6 text-balance text-4xl font-medium leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">
-            The permission layer for{' '}
+            The permission layer for{" "}
             <span className="text-primary">autonomous agent</span> wallets
           </h1>
 
-          <p className="mt-5 max-w-xl text-pretty text-xl font-medium leading-relaxed text-foreground">
-            I don&apos;t delegate my wallet. I delegate a mandate.
-          </p>
-
+          {/* <p className="mt-6 max-w-xl text-pretty text-lg leading-relaxed text-muted-foreground">
+            Mandate lets an owner sign once, grant a capped Move policy object,
+            and let an agent execute real DeepBook PTBs within budget, scope,
+            expiry, and revocation limits.
+          </p> */}
           <p className="mt-6 max-w-xl text-pretty text-lg leading-relaxed text-muted-foreground">
-            AI agents are stuck at the approve wall. Mandate lets an owner
-            sign once, grant a capped Move policy object, and let an agent
-            execute real DeepBook PTBs within budget, scope, expiry, and
-            revocation limits.
+            Mandate lets owners define budgets, protocol scope, and expiration
+            once, then allow agents to execute autonomously within those limits
+            — without requiring a signature for every action.
           </p>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
@@ -112,9 +112,9 @@ export function Hero() {
 
           <dl className="mt-12 grid max-w-lg grid-cols-3 gap-5 border-t border-border pt-6">
             {[
-              { v: String(stats.executedVolume), k: 'Executed Volume' },
-              { v: String(stats.executions), k: 'DeepBook Executions' },
-              { v: String(stats.blocked), k: 'Blocked Actions' },
+              { v: String(stats.executedVolume), k: "Executed Volume" },
+              { v: String(stats.executions), k: "DeepBook Executions" },
+              { v: String(stats.blocked), k: "Blocked Actions" },
             ].map((s) => (
               <div key={s.k}>
                 <dt className="font-mono text-xl font-semibold leading-none text-foreground sm:text-2xl">
@@ -129,11 +129,11 @@ export function Hero() {
         <MandateCard stats={stats} />
       </div>
     </section>
-  )
+  );
 }
 
 function MandateCard({ stats }: { stats: HeroStats }) {
-  const progress = (stats.executedVolume / BUDGET_SUI) * 100
+  const progress = (stats.executedVolume / BUDGET_SUI) * 100;
 
   return (
     <div className="glass relative rounded-2xl border border-border p-1.5 shadow-2xl shadow-black/40">
@@ -167,8 +167,8 @@ function MandateCard({ stats }: { stats: HeroStats }) {
             <div
               className={
                 stats.rejected
-                  ? 'h-full rounded-full bg-amber-300 transition-[width] duration-300'
-                  : 'h-full rounded-full bg-primary transition-[width] duration-300'
+                  ? "h-full rounded-full bg-amber-300 transition-[width] duration-300"
+                  : "h-full rounded-full bg-primary transition-[width] duration-300"
               }
               style={{ width: `${progress}%` }}
             />
@@ -176,22 +176,22 @@ function MandateCard({ stats }: { stats: HeroStats }) {
           <p
             className={
               stats.rejected
-                ? 'mt-2 min-h-4 text-xs text-amber-300'
-                : 'mt-2 min-h-4 text-xs text-muted-foreground'
+                ? "mt-2 min-h-4 text-xs text-amber-300"
+                : "mt-2 min-h-4 text-xs text-muted-foreground"
             }
           >
             {stats.rejected
-              ? 'Blocked: next 30 SUI order would exceed the 500 SUI budget.'
+              ? "Blocked: next 30 SUI order would exceed the 500 SUI budget."
               : `${stats.executions} DeepBook PTBs executed within policy.`}
           </p>
         </div>
 
         <dl className="mt-5 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border text-sm">
           {[
-            { k: 'Agent', v: 'backend-trading-agent' },
-            { k: 'Expires', v: 'in 6d 4h' },
-            { k: 'Protocols', v: 'DeepBook only' },
-            { k: 'Per-tx cap', v: '30 SUI' },
+            { k: "Agent", v: "backend-trading-agent" },
+            { k: "Expires", v: "in 6d 4h" },
+            { k: "Protocols", v: "DeepBook only" },
+            { k: "Per-tx cap", v: "30 SUI" },
           ].map((row) => (
             <div key={row.k} className="bg-card px-3 py-2.5">
               <dt className="text-xs text-muted-foreground">{row.k}</dt>
@@ -212,5 +212,5 @@ function MandateCard({ stats }: { stats: HeroStats }) {
         </div>
       </div>
     </div>
-  )
+  );
 }

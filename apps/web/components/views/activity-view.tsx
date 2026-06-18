@@ -35,6 +35,7 @@ const KIND_FILTERS: { value: string; label: string }[] = [
   { value: "tx.blocked", label: "Blocked" },
   { value: "mandate.created", label: "Created" },
   { value: "mandate.revoked", label: "Revoked" },
+  { value: "mandate.withdrawn", label: "Withdrawn" },
 ]
 
 const PAGE_SIZE = 20

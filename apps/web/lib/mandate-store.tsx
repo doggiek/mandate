@@ -31,6 +31,7 @@ import {
   queryMandateCreatedEvents,
   queryMandateRejectEvents,
   queryMandateRevokeEvents,
+  queryMandateWithdrawEvents,
 } from "@/lib/sui-rpc";
 import type {
   SuiEvent,
@@ -73,6 +74,7 @@ type StoreContextValue = {
   isWalletScoped: boolean;
   createMandate: (input: NewMandateInput) => Mandate;
   revokeMandate: (id: string, digest?: string) => void;
+  withdrawMandate: (id: string, digest?: string) => void;
   recordAgentExecution: (input: {
     mandateId: string;
     digest?: string;
@@ -213,13 +215,13 @@ function timestampMs(value: unknown) {
 }
 
 function deriveMandateStatus(mandate: Mandate): Mandate["status"] {
-  if (mandate.status === "revoked") {
-    return "revoked";
-  }
-
   const expiresAt = new Date(mandate.expiresAt).getTime();
   if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
     return "expired";
+  }
+
+  if (mandate.status === "revoked") {
+    return "revoked";
   }
 
   return "active";
@@ -227,9 +229,14 @@ function deriveMandateStatus(mandate: Mandate): Mandate["status"] {
 
 function normalizeMandateStatus(mandate: Mandate): Mandate {
   const status = deriveMandateStatus(mandate);
+  const remainingVaultBalance =
+    mandate.remainingVaultBalance ?? Math.max(mandate.budget - mandate.spent, 0);
   return {
     ...mandate,
     status,
+    remainingVaultBalance,
+    isWithdrawable: status !== "active" && remainingVaultBalance > 0,
+    isWithdrawn: remainingVaultBalance <= 0,
     expiresLabel:
       status === "expired"
         ? "Expired"
@@ -302,6 +309,27 @@ function moveObjectFields(response: SuiObjectResponse) {
     : {};
 }
 
+function moveBalanceValue(value: unknown): unknown {
+  if (typeof value === "string" || typeof value === "number") {
+    return value;
+  }
+
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  if ("value" in record) {
+    return record.value;
+  }
+
+  if ("fields" in record) {
+    return moveBalanceValue(record.fields);
+  }
+
+  return undefined;
+}
+
 function moveObjectType(response?: SuiObjectResponse) {
   const content = response?.data?.content;
   return content && content.dataType === "moveObject"
@@ -342,14 +370,24 @@ function mapCreatedEventToMandate(
   const createdAt = createdAtMs
     ? new Date(createdAtMs).toISOString()
     : new Date(0).toISOString();
-  const status: Mandate["status"] = !isActive
-    ? "revoked"
-    : new Date(expiresAt).getTime() <= Date.now()
-      ? "expired"
+  const isExpired = new Date(expiresAt).getTime() <= Date.now();
+  const status: Mandate["status"] = isExpired
+    ? "expired"
+    : !isActive
+      ? "revoked"
       : "active";
   const objectType = moveObjectType(object);
   const asset = assetMetadataFromObjectType(objectType);
   const amountDecimals = asset.assetDecimals;
+  const rawVaultBalance =
+    objectType?.includes("::mandate::AssetMandate<")
+      ? moveBalanceValue(objectFields.vault_balance)
+      : moveBalanceValue(objectFields.sui_balance);
+  const remainingVaultBalance = baseUnitsToDisplay(
+    rawVaultBalance ??
+      Math.max(Number(budgetCeiling ?? 0) - Number(currentSpent ?? 0), 0),
+    amountDecimals,
+  );
   if (process.env.NODE_ENV !== "production") {
     console.info("[MANDATE] loaded mandate object", {
       mandateId,
@@ -386,6 +424,9 @@ function mapCreatedEventToMandate(
     expiresLabel:
       status === "expired" ? "Expired" : stableExpiryLabel(expiresAt, status),
     createdAtDisplay: clientTimeDisplay(createdAt),
+    remainingVaultBalance,
+    isWithdrawable: status !== "active" && remainingVaultBalance > 0,
+    isWithdrawn: remainingVaultBalance <= 0,
   };
 }
 
@@ -689,6 +730,20 @@ function mapEventToActivity(
       message: "Owner revoked mandate",
       title: "Owner revoked mandate",
       status: "revoked",
+    };
+  }
+
+  if (event.type.endsWith("WithdrawEvent")) {
+    return {
+      ...base,
+      kind: "mandate.withdrawn",
+      amount: amountValue,
+      amountSui: amountValue,
+      amountAsset: formatAssetAmount(amountValue, assetSymbol),
+      assetSymbol,
+      message: "Remaining funds withdrawn",
+      title: "Remaining funds withdrawn",
+      status: "withdrawn",
     };
   }
 
@@ -1098,8 +1153,13 @@ export function MandateStoreProvider({
               isCurrentMandateObjectType(mandate.objectType),
           );
         const mandateIds = createdMandates.map((mandate) => mandate.id);
-        const [activityEvents, revokeEvents, rejectEvents, blockedEvents] =
-          await Promise.all([
+        const [
+          activityEvents,
+          revokeEvents,
+          rejectEvents,
+          blockedEvents,
+          withdrawEvents,
+        ] = await Promise.all([
             Promise.all(
               mandateIds.map((id) => queryMandateActivityEvents(id)),
             ).then((pages) => pages.flat()),
@@ -1112,6 +1172,9 @@ export function MandateStoreProvider({
             Promise.all(
               mandateIds.map((id) => queryMandateBlockedEvents(id)),
             ).then((pages) => pages.flat()),
+            Promise.all(
+              mandateIds.map((id) => queryMandateWithdrawEvents(id)),
+            ).then((pages) => pages.flat()),
           ]);
         const mandateByIdForEvents = new Map(
           createdMandates.map((mandate) => [mandate.id, mandate]),
@@ -1122,6 +1185,7 @@ export function MandateStoreProvider({
           ...revokeEvents,
           ...rejectEvents,
           ...blockedEvents,
+          ...withdrawEvents,
         ];
         const txDigests = Array.from(
           new Set(allRpcEvents.map(eventDigest).filter(Boolean)),
@@ -1208,6 +1272,9 @@ export function MandateStoreProvider({
       protocol: input.protocols[0],
       expiresLabel: input.expiresLabel,
       createdAtDisplay: "just now",
+      remainingVaultBalance: input.budget,
+      isWithdrawable: false,
+      isWithdrawn: false,
     };
     const metadata: UserMandateMetadata = {
       mandateId: mandate.id,
@@ -1257,15 +1324,36 @@ export function MandateStoreProvider({
     (id: string, digest?: string) => {
       setUserMandates((prev) => {
         const next = prev.map((m) =>
-          m.id === id ? { ...m, status: "revoked" as const } : m,
+          m.id === id
+            ? {
+                ...m,
+                status: "revoked" as const,
+                remainingVaultBalance: 0,
+                isWithdrawable: false,
+                isWithdrawn: true,
+              }
+            : m,
         );
         writeStorageArray(USER_MANDATES_KEY, next);
         return next;
       });
       setRpcMandates((prev) =>
-        prev.map((m) => (m.id === id ? { ...m, status: "revoked" } : m)),
+        prev.map((m) =>
+          m.id === id
+            ? {
+                ...m,
+                status: "revoked",
+                remainingVaultBalance: 0,
+                isWithdrawable: false,
+                isWithdrawn: true,
+              }
+            : m,
+        ),
       );
       const target = [...rpcMandates, ...userMandates].find((m) => m.id === id);
+      const withdrawnAmount =
+        target?.remainingVaultBalance ??
+        (target ? Math.max(target.budget - target.spent, 0) : 0);
       const revokedActivity: ActivityEvent = {
         id: digest ? `${digest}:optimistic-revoke:${id}` : randomId("evt"),
         kind: "mandate.revoked",
@@ -1279,9 +1367,93 @@ export function MandateStoreProvider({
         status: "revoked",
         timeDisplay: "syncing",
       };
-      setRpcActivity((prev) => uniqActivity([revokedActivity, ...prev]));
+      const withdrawnActivity: ActivityEvent | null =
+        withdrawnAmount > 0
+          ? {
+              id: digest
+                ? `${digest}:optimistic-withdraw:${id}`
+                : randomId("evt"),
+              kind: "mandate.withdrawn",
+              mandateId: id,
+              agentName: target?.label ?? "Agent Wallet",
+              protocol: target?.protocol ?? target?.protocols[0],
+              amount: withdrawnAmount,
+              message: "Remaining funds withdrawn",
+              timestamp: "",
+              digest,
+              title: "Remaining funds withdrawn",
+              status: "withdrawn",
+              amountSui: withdrawnAmount,
+              amountAsset: formatAssetAmount(
+                withdrawnAmount,
+                target?.assetSymbol ?? "SUI",
+              ),
+              assetSymbol: target?.assetSymbol ?? "SUI",
+              timeDisplay: "syncing",
+            }
+          : null;
+      const optimisticActivities = withdrawnActivity
+        ? [withdrawnActivity, revokedActivity]
+        : [revokedActivity];
+      setRpcActivity((prev) => uniqActivity([...optimisticActivities, ...prev]));
       setUserActivity((prev) => {
-        const next = uniqById([revokedActivity, ...prev]);
+        const next = uniqById([...optimisticActivities, ...prev]);
+        writeStorageArray(USER_ACTIVITY_KEY, next);
+        return next;
+      });
+    },
+    [rpcMandates, userMandates],
+  );
+
+  const withdrawMandate = React.useCallback(
+    (id: string, digest?: string) => {
+      const updateWithdrawn = (m: Mandate): Mandate =>
+        m.id === id
+          ? {
+              ...m,
+              status: m.status === "active" ? "expired" : m.status,
+              remainingVaultBalance: 0,
+              isWithdrawable: false,
+              isWithdrawn: true,
+            }
+          : m;
+
+      const target = [...rpcMandates, ...userMandates].find((m) => m.id === id);
+      const withdrawnAmount =
+        target?.remainingVaultBalance ??
+        (target ? Math.max(target.budget - target.spent, 0) : 0);
+
+      setUserMandates((prev) => {
+        const next = prev.map(updateWithdrawn);
+        writeStorageArray(USER_MANDATES_KEY, next);
+        return next;
+      });
+      setRpcMandates((prev) => prev.map(updateWithdrawn));
+
+      const withdrawnActivity: ActivityEvent = {
+        id: digest ? `${digest}:optimistic-withdraw:${id}` : randomId("evt"),
+        kind: "mandate.withdrawn",
+        mandateId: id,
+        agentName: target?.label ?? "Agent Wallet",
+        protocol: target?.protocol ?? target?.protocols[0],
+        amount: withdrawnAmount,
+        message: "Remaining funds withdrawn",
+        timestamp: "",
+        digest,
+        title: "Remaining funds withdrawn",
+        status: "withdrawn",
+        amountSui: withdrawnAmount,
+        amountAsset: formatAssetAmount(
+          withdrawnAmount,
+          target?.assetSymbol ?? "SUI",
+        ),
+        assetSymbol: target?.assetSymbol ?? "SUI",
+        timeDisplay: "syncing",
+      };
+
+      setRpcActivity((prev) => uniqActivity([withdrawnActivity, ...prev]));
+      setUserActivity((prev) => {
+        const next = uniqById([withdrawnActivity, ...prev]);
         writeStorageArray(USER_ACTIVITY_KEY, next);
         return next;
       });
@@ -1607,6 +1779,7 @@ export function MandateStoreProvider({
       isWalletScoped: Boolean(account?.address),
       createMandate,
       revokeMandate,
+      withdrawMandate,
       recordAgentExecution,
       recordBlockedAction,
       refreshMandates,
@@ -1621,6 +1794,7 @@ export function MandateStoreProvider({
       account?.address,
       createMandate,
       revokeMandate,
+      withdrawMandate,
       recordAgentExecution,
       recordBlockedAction,
       refreshMandates,

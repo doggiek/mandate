@@ -281,13 +281,38 @@ fun owner_withdraws_remaining_sui_after_revoke() {
     test_scenario::next_tx(&mut scenario, OWNER);
     let mut mandate = test_scenario::take_shared<Mandate>(&scenario);
     mandate::revoke_mandate(&mut mandate, &clock, test_scenario::ctx(&mut scenario));
-    mandate::withdraw_remaining_sui(&mut mandate, test_scenario::ctx(&mut scenario));
+    mandate::withdraw_remaining_sui_after_expiry(&mut mandate, &clock, test_scenario::ctx(&mut scenario));
     assert!(mandate::vault_balance(&mandate) == 0, 0);
     test_scenario::return_shared(mandate);
 
     test_scenario::next_tx(&mut scenario, OWNER);
     let withdrawn = test_scenario::take_from_sender<Coin<SUI>>(&scenario);
     assert!(coin::value(&withdrawn) == 80, 1);
+    coin::burn_for_testing(withdrawn);
+
+    clock::destroy_for_testing(clock);
+    test_scenario::end(scenario);
+}
+
+/// Owner can recover remaining vault SUI after expiry without a separate revoke.
+#[test]
+fun owner_withdraws_remaining_sui_after_expiry() {
+    let mut scenario = test_scenario::begin(OWNER);
+    let mut clock = new_clock(&mut scenario);
+
+    create_default_mandate(&mut scenario, &clock);
+    clock::increment_for_testing(&mut clock, 86_400_001);
+
+    test_scenario::next_tx(&mut scenario, OWNER);
+    let mut mandate = test_scenario::take_shared<Mandate>(&scenario);
+    mandate::withdraw_remaining_sui_after_expiry(&mut mandate, &clock, test_scenario::ctx(&mut scenario));
+    assert!(mandate::vault_balance(&mandate) == 0, 0);
+    assert!(!mandate::is_active(&mandate), 1);
+    test_scenario::return_shared(mandate);
+
+    test_scenario::next_tx(&mut scenario, OWNER);
+    let withdrawn = test_scenario::take_from_sender<Coin<SUI>>(&scenario);
+    assert!(coin::value(&withdrawn) == 100, 2);
     coin::burn_for_testing(withdrawn);
 
     clock::destroy_for_testing(clock);
@@ -338,6 +363,34 @@ fun agent_takes_generic_vault_coin_success() {
     assert!(mandate::asset_vault_balance(&mandate) == 900, 1);
     test_scenario::return_shared(mandate);
     coin::burn_for_testing(coin);
+
+    clock::destroy_for_testing(clock);
+    test_scenario::end(scenario);
+}
+
+/// Owner can recover remaining generic vault asset after expiry.
+#[test]
+fun owner_withdraws_remaining_generic_coin_after_expiry() {
+    let mut scenario = test_scenario::begin(OWNER);
+    let mut clock = new_clock(&mut scenario);
+
+    create_testusd_mandate(&mut scenario, &clock);
+    clock::increment_for_testing(&mut clock, 86_400_001);
+
+    test_scenario::next_tx(&mut scenario, OWNER);
+    let mut mandate = test_scenario::take_shared<AssetMandate<TESTUSD>>(&scenario);
+    mandate::withdraw_remaining_coin_after_expiry<TESTUSD>(
+        &mut mandate,
+        &clock,
+        test_scenario::ctx(&mut scenario),
+    );
+    assert!(mandate::asset_vault_balance(&mandate) == 0, 0);
+    test_scenario::return_shared(mandate);
+
+    test_scenario::next_tx(&mut scenario, OWNER);
+    let withdrawn = test_scenario::take_from_sender<Coin<TESTUSD>>(&scenario);
+    assert!(coin::value(&withdrawn) == 1_000, 1);
+    coin::burn_for_testing(withdrawn);
 
     clock::destroy_for_testing(clock);
     test_scenario::end(scenario);

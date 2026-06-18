@@ -447,6 +447,18 @@ function policyBlockedDetail(
   return "Move policy rejected the agent action";
 }
 
+function inactiveMandateStopMessage(
+  mandate?: { status: "active" | "expired" | "revoked" },
+) {
+  if (mandate?.status === "revoked") {
+    return "Automation stopped: mandate revoked.";
+  }
+  if (mandate?.status === "expired") {
+    return "Automation stopped: mandate expired.";
+  }
+  return "Automation stopped: mandate inactive or expired.";
+}
+
 function signalSourceLabel(signal: SignalStatus | null) {
   if (!signal) {
     return "signal";
@@ -1264,7 +1276,11 @@ export function AgentExecutionPanel() {
   ]);
 
   const stopAutoRun = React.useCallback(
-    (status: AutoRunStatus = "stopped", message?: string) => {
+    (
+      status: AutoRunStatus = "stopped",
+      message?: string,
+      logLevel?: RuntimeLogLevel,
+    ) => {
       if (autoTimerRef.current) {
         window.clearTimeout(autoTimerRef.current);
         autoTimerRef.current = null;
@@ -1275,7 +1291,10 @@ export function AgentExecutionPanel() {
       setAutoNextRunAt(null);
       setAutoMessage(message ?? null);
       if (message) {
-        appendRuntimeLog(status === "error" ? "failed" : "info", message);
+        appendRuntimeLog(
+          logLevel ?? (status === "error" ? "failed" : "info"),
+          message,
+        );
       }
     },
     [appendRuntimeLog],
@@ -1839,11 +1858,19 @@ export function AgentExecutionPanel() {
           setAutoLastDigest(outcome.result.digest);
         }
         setAutoRunCount((count) => count + 1);
+        const inactiveStopMessage =
+          policyStrategy === "revoked_expired"
+            ? inactiveMandateStopMessage(selectedMandate)
+            : "Auto Run stopped.";
         stopAutoRun(
           outcome.result?.status === "BLOCKED" ? "stopped" : "error",
           outcome.result?.status === "BLOCKED"
-            ? "Auto Run stopped."
+            ? inactiveStopMessage
             : (outcome.error ?? "Auto Run failed."),
+          outcome.result?.status === "BLOCKED" &&
+            policyStrategy === "revoked_expired"
+            ? "blocked"
+            : undefined,
         );
       });
       return;

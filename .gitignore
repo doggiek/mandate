@@ -1,6 +1,7 @@
 .env
 .env.local
 .env.*.local
+mandate.code-workspace
 node_modules/
 build/
 .next/
@@ -25,3 +26,4 @@ node_modules/
 **/.next/
 *.tsbuildinfo
 **/*.tsbuildinfo
+

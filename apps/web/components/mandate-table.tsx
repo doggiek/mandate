@@ -63,6 +63,11 @@ export function MandateTable({
               normalizeSuiAddress(account?.address) ===
                 normalizeSuiAddress(m.ownerAddress);
             const canRevoke = !isKnownOlderPackage && isOwnerWallet;
+            const remainingVaultBalance =
+              m.remainingVaultBalance ?? Math.max(m.budget - m.spent, 0);
+            const isWithdrawn = m.isWithdrawn || remainingVaultBalance <= 0;
+            const canOpenWithdraw =
+              m.status !== "active" && remainingVaultBalance > 0;
 
             return (
               <TableRow
@@ -159,6 +164,28 @@ export function MandateTable({
                         <ShieldOff data-icon="inline-start" />
                         Revoke
                       </Button>
+                    )}
+                    {m.status !== "active" && (
+                      canOpenWithdraw ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onSelect(m.id);
+                          }}
+                          title="Open details to withdraw remaining vault funds"
+                        >
+                          Withdraw
+                        </Button>
+                      ) : (
+                        <Badge
+                          variant="outline"
+                          className="border-cyan-500/25 bg-cyan-500/10 text-cyan-300"
+                        >
+                          {isWithdrawn ? "Withdrawn" : "No funds"}
+                        </Badge>
+                      )
                     )}
                     <ChevronRight className="size-4 text-muted-foreground" />
                   </div>

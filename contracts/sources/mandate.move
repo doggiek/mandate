@@ -127,6 +127,14 @@ public struct BlockedEvent has copy, drop {
     timestamp_ms: u64,
 }
 
+/// Emitted when the owner withdraws remaining vault funds.
+public struct WithdrawEvent has copy, drop {
+    mandate_id: ID,
+    owner: address,
+    amount: u64,
+    timestamp_ms: u64,
+}
+
 /// Returns the MVP DeepBook protocol constant for clients and tests.
 public fun deepbook_protocol(): u8 {
     PROTOCOL_DEEPBOOK
@@ -516,6 +524,32 @@ entry fun withdraw_remaining_sui(
     transfer::public_transfer(coin::from_balance(withdrawn, ctx), sender);
 }
 
+/// Withdraws all remaining SUI after revocation or expiry.
+entry fun withdraw_remaining_sui_after_expiry(
+    mandate: &mut Mandate,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let sender = tx_context::sender(ctx);
+    let timestamp_ms = clock::timestamp_ms(clock);
+    assert!(sender == mandate.owner, E_NOT_OWNER);
+    assert!(!mandate.is_active || timestamp_ms > mandate.expires_at_ms, E_EXPIRED);
+
+    mandate.is_active = false;
+
+    let amount = balance::value(&mandate.sui_balance);
+    let withdrawn = balance::split(&mut mandate.sui_balance, amount);
+
+    event::emit(WithdrawEvent {
+        mandate_id: object::id(mandate),
+        owner: sender,
+        amount,
+        timestamp_ms,
+    });
+
+    transfer::public_transfer(coin::from_balance(withdrawn, ctx), sender);
+}
+
 /// Withdraws all remaining generic vault asset after revocation.
 entry fun withdraw_remaining_coin<T>(
     mandate: &mut AssetMandate<T>,
@@ -527,5 +561,31 @@ entry fun withdraw_remaining_coin<T>(
 
     let amount = balance::value(&mandate.vault_balance);
     let withdrawn = balance::split(&mut mandate.vault_balance, amount);
+    transfer::public_transfer(coin::from_balance(withdrawn, ctx), sender);
+}
+
+/// Withdraws all remaining generic vault asset after revocation or expiry.
+entry fun withdraw_remaining_coin_after_expiry<T>(
+    mandate: &mut AssetMandate<T>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let sender = tx_context::sender(ctx);
+    let timestamp_ms = clock::timestamp_ms(clock);
+    assert!(sender == mandate.owner, E_NOT_OWNER);
+    assert!(!mandate.is_active || timestamp_ms > mandate.expires_at_ms, E_EXPIRED);
+
+    mandate.is_active = false;
+
+    let amount = balance::value(&mandate.vault_balance);
+    let withdrawn = balance::split(&mut mandate.vault_balance, amount);
+
+    event::emit(WithdrawEvent {
+        mandate_id: object::id(mandate),
+        owner: sender,
+        amount,
+        timestamp_ms,
+    });
+
     transfer::public_transfer(coin::from_balance(withdrawn, ctx), sender);
 }

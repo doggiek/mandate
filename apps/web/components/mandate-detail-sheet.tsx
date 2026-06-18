@@ -170,6 +170,10 @@ function objectTypeFromResponse(
     : undefined;
 }
 
+function assetMandateTypeArg(objectType?: string) {
+  return objectType?.match(/AssetMandate<(.+)>/)?.[1];
+}
+
 function DetailMetric({
   label,
   value,
@@ -204,14 +208,25 @@ export function MandateDetailSheet({
   startRevokeNonce?: number;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { mandates, activity, orders, revokeMandate, refreshMandates } =
-    useMandateStore();
+  const {
+    mandates,
+    activity,
+    orders,
+    revokeMandate,
+    withdrawMandate,
+    refreshMandates,
+  } = useMandateStore();
   const account = useCurrentAccount();
   const client = useSuiClient();
   const [confirmingRevoke, setConfirmingRevoke] = React.useState(false);
   const [revokeDigest, setRevokeDigest] = React.useState<string | null>(null);
+  const [withdrawDigest, setWithdrawDigest] = React.useState<string | null>(
+    null,
+  );
   const [isRevoking, setRevoking] = React.useState(false);
+  const [isWithdrawing, setWithdrawing] = React.useState(false);
   const [revokeError, setRevokeError] = React.useState<string | null>(null);
+  const [withdrawError, setWithdrawError] = React.useState<string | null>(null);
   const sheetBodyRef = React.useRef<HTMLDivElement | null>(null);
   const revokeConfirmRef = React.useRef<HTMLElement | null>(null);
   const closeTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(
@@ -229,8 +244,11 @@ export function MandateDetailSheet({
   React.useEffect(() => {
     setConfirmingRevoke(false);
     setRevokeDigest(null);
+    setWithdrawDigest(null);
     setRevokeError(null);
+    setWithdrawError(null);
     setRevoking(false);
+    setWithdrawing(false);
     if (closeTimeoutRef.current) {
       clearTimeout(closeTimeoutRef.current);
       closeTimeoutRef.current = null;
@@ -278,7 +296,10 @@ export function MandateDetailSheet({
     setConfirmingRevoke(true);
   }, [mandate?.id, mandate?.objectType, mandate?.status, startRevokeNonce]);
 
-  const remaining = mandate ? Math.max(mandate.budget - mandate.spent, 0) : 0;
+  const remaining = mandate
+    ? (mandate.remainingVaultBalance ??
+      Math.max(mandate.budget - mandate.spent, 0))
+    : 0;
   const agentAddress = mandate?.agentAddress;
   const ownerAddress = mandate?.ownerAddress;
   const isLatestPackageMandate =
@@ -293,6 +314,14 @@ export function MandateDetailSheet({
     mandate?.status === "active" &&
     !isKnownOlderPackageMandate &&
     isOwnerWallet;
+  const canWithdraw =
+    Boolean(mandate) &&
+    mandate?.status !== "active" &&
+    remaining > 0 &&
+    !isKnownOlderPackageMandate &&
+    isOwnerWallet;
+  const isWithdrawn =
+    Boolean(mandate) && (mandate?.isWithdrawn || remaining <= 0);
 
   const signAndExecute =
     useSignAndExecuteTransaction<SuiTransactionBlockResponse>({
@@ -335,20 +364,21 @@ export function MandateDetailSheet({
 
       const tx = new Transaction();
       if (objectType?.includes("::mandate::AssetMandate<")) {
-        if (!DUSDC_COIN_TYPE) {
+        const typeArg = assetMandateTypeArg(objectType) ?? DUSDC_COIN_TYPE;
+        if (!typeArg) {
           throw new Error(
             "NEXT_PUBLIC_DBUSDC_COIN_TYPE / NEXT_PUBLIC_DUSDC_COIN_TYPE is not configured.",
           );
         }
         tx.moveCall({
           target: `${PACKAGE_ID}::mandate::revoke_asset_mandate`,
-          typeArguments: [DUSDC_COIN_TYPE],
+          typeArguments: [typeArg],
           arguments: [tx.object(mandate.id), tx.object(CLOCK_OBJECT_ID)],
         });
         tx.moveCall({
-          target: `${PACKAGE_ID}::mandate::withdraw_remaining_coin`,
-          typeArguments: [DUSDC_COIN_TYPE],
-          arguments: [tx.object(mandate.id)],
+          target: `${PACKAGE_ID}::mandate::withdraw_remaining_coin_after_expiry`,
+          typeArguments: [typeArg],
+          arguments: [tx.object(mandate.id), tx.object(CLOCK_OBJECT_ID)],
         });
       } else {
         tx.moveCall({
@@ -356,8 +386,8 @@ export function MandateDetailSheet({
           arguments: [tx.object(mandate.id), tx.object(CLOCK_OBJECT_ID)],
         });
         tx.moveCall({
-          target: `${PACKAGE_ID}::mandate::withdraw_remaining_sui`,
-          arguments: [tx.object(mandate.id)],
+          target: `${PACKAGE_ID}::mandate::withdraw_remaining_sui_after_expiry`,
+          arguments: [tx.object(mandate.id), tx.object(CLOCK_OBJECT_ID)],
         });
       }
 
@@ -388,6 +418,69 @@ export function MandateDetailSheet({
       );
     } finally {
       setRevoking(false);
+    }
+  };
+
+  const handleWithdraw = async () => {
+    if (!mandate || isWithdrawing || !canWithdraw) return;
+
+    if (!isOwnerWallet) {
+      setWithdrawError("Only the owner wallet can withdraw remaining funds.");
+      return;
+    }
+
+    setWithdrawing(true);
+    setWithdrawError(null);
+
+    try {
+      const objectType =
+        mandate.objectType ??
+        objectTypeFromResponse(await getMandateObject(mandate.id));
+      if (!isCurrentMandateObjectType(objectType)) {
+        setWithdrawError(OLD_PACKAGE_MESSAGE);
+        return;
+      }
+
+      const tx = new Transaction();
+      if (objectType?.includes("::mandate::AssetMandate<")) {
+        const typeArg = assetMandateTypeArg(objectType) ?? DUSDC_COIN_TYPE;
+        if (!typeArg) {
+          throw new Error(
+            "NEXT_PUBLIC_DBUSDC_COIN_TYPE / NEXT_PUBLIC_DUSDC_COIN_TYPE is not configured.",
+          );
+        }
+        tx.moveCall({
+          target: `${PACKAGE_ID}::mandate::withdraw_remaining_coin_after_expiry`,
+          typeArguments: [typeArg],
+          arguments: [tx.object(mandate.id), tx.object(CLOCK_OBJECT_ID)],
+        });
+      } else {
+        tx.moveCall({
+          target: `${PACKAGE_ID}::mandate::withdraw_remaining_sui_after_expiry`,
+          arguments: [tx.object(mandate.id), tx.object(CLOCK_OBJECT_ID)],
+        });
+      }
+
+      const result = await withRevokeTimeout(
+        signAndExecute.mutateAsync({ transaction: tx }),
+      );
+      const executionStatus = result.effects?.status;
+
+      if (executionStatus?.status !== "success") {
+        throw new Error(executionStatus?.error ?? "Transaction failed");
+      }
+
+      setWithdrawDigest(result.digest);
+      withdrawMandate(mandate.id, result.digest);
+      refreshMandates();
+    } catch (caught) {
+      setWithdrawError(
+        isCancellationLikeError(caught)
+          ? "Transaction was cancelled or interrupted. Please try again."
+          : getErrorMessage(caught),
+      );
+    } finally {
+      setWithdrawing(false);
     }
   };
 
@@ -472,6 +565,21 @@ export function MandateDetailSheet({
                 </Alert>
               )}
 
+              {withdrawDigest && (
+                <Alert className="border-primary/25 bg-primary/10">
+                  <CheckCircle2 className="size-4 text-primary" />
+                  <AlertTitle>Remaining funds withdrawn</AlertTitle>
+                  <AlertDescription>
+                    Digest{" "}
+                    <CopyableId
+                      value={withdrawDigest}
+                      label="withdraw digest"
+                      className="text-foreground"
+                    />
+                  </AlertDescription>
+                </Alert>
+              )}
+
               {revokeError && (
                 <Alert
                   variant="destructive"
@@ -480,6 +588,17 @@ export function MandateDetailSheet({
                   <AlertTriangle className="size-4" />
                   <AlertTitle>Unable to revoke mandate</AlertTitle>
                   <AlertDescription>{revokeError}</AlertDescription>
+                </Alert>
+              )}
+
+              {withdrawError && (
+                <Alert
+                  variant="destructive"
+                  className="border-destructive/30 bg-destructive/10"
+                >
+                  <AlertTriangle className="size-4" />
+                  <AlertTitle>Unable to withdraw funds</AlertTitle>
+                  <AlertDescription>{withdrawError}</AlertDescription>
                 </Alert>
               )}
 
@@ -726,24 +845,47 @@ export function MandateDetailSheet({
                     <div>
                       <h3 className="text-sm font-medium">Owner controls</h3>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Revocation is signed by the owner wallet. Remaining
-                        vault SUI is withdrawn back to the owner.
+                        {mandate.status === "active"
+                          ? "Revocation is signed by the owner wallet. Remaining vault funds are withdrawn back to the owner."
+                          : isWithdrawn
+                            ? "No remaining vault funds are available to withdraw."
+                            : "Expired or revoked mandate vault funds can be withdrawn by the owner wallet."}
                       </p>
                     </div>
-                    <Button
-                      variant="destructive"
-                      disabled={!canRevoke || isRevoking}
-                      onClick={() => setConfirmingRevoke(true)}
-                      title={
-                        isLatestPackageMandate
-                          ? "Permanently revoke owner-granted agent permission"
-                          : isKnownOlderPackageMandate
-                            ? OLD_PACKAGE_MESSAGE
-                            : "Verifying Mandate package before revoke"
-                      }
-                    >
-                      {isRevoking ? "Revoking" : "Revoke + Withdraw"}
-                    </Button>
+                    {mandate.status === "active" ? (
+                      <Button
+                        variant="destructive"
+                        disabled={!canRevoke || isRevoking}
+                        onClick={() => setConfirmingRevoke(true)}
+                        title={
+                          isLatestPackageMandate
+                            ? "Permanently revoke owner-granted agent permission"
+                            : isKnownOlderPackageMandate
+                              ? OLD_PACKAGE_MESSAGE
+                              : "Verifying Mandate package before revoke"
+                        }
+                      >
+                        {isRevoking ? "Revoking" : "Revoke + Withdraw"}
+                      </Button>
+                    ) : canWithdraw ? (
+                      <Button
+                        variant="default"
+                        disabled={isWithdrawing}
+                        onClick={handleWithdraw}
+                        title="Withdraw remaining vault funds back to the owner wallet"
+                      >
+                        {isWithdrawing
+                          ? "Withdrawing"
+                          : "Withdraw Remaining Funds"}
+                      </Button>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="border-cyan-500/25 bg-cyan-500/10 text-cyan-300"
+                      >
+                        {isWithdrawn ? "Withdrawn" : "No withdrawable funds"}
+                      </Badge>
+                    )}
                   </div>
                 )}
               </section>

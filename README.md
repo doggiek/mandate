@@ -1,6 +1,6 @@
 # Mandate
 
-Mandate is an Autonomous Agent Wallet project on Sui.
+Mandate is a programmable permission layer for autonomous agent wallets on Sui.
 
 An Owner wallet creates a revocable on-chain Mandate object that grants a
 backend Trading Agent capped spending authority. The Agent can submit DeepBook
