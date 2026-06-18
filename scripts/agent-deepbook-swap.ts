@@ -16,6 +16,30 @@ const DEFAULT_BACKEND_AGENT_ADDRESS =
 const OLD_PACKAGE_ERROR =
   "Selected mandate belongs to an old package. Create a new mandate with the current package.";
 
+type SuiNetwork = "testnet" | "mainnet";
+
+function activeNetwork(): SuiNetwork {
+  const value = (
+    process.env.NEXT_PUBLIC_SUI_NETWORK ??
+    process.env.NEXT_PUBLIC_NETWORK ??
+    "testnet"
+  ).toLowerCase();
+
+  return value === "mainnet" ? "mainnet" : "testnet";
+}
+
+function activeRpcUrl() {
+  const network = activeNetwork();
+  const suffix = network.toUpperCase();
+  return (
+    process.env.SUI_RPC_URL ??
+    process.env[`NEXT_PUBLIC_SUI_RPC_${suffix}`] ??
+    (network === "mainnet"
+      ? "https://fullnode.mainnet.sui.io:443"
+      : "https://fullnode.testnet.sui.io:443")
+  );
+}
+
 type TransactionLike = {
   digest?: string;
   status?: {
@@ -124,7 +148,7 @@ function isCurrentMandateObjectType(
 async function fetchMandateObjectInfo(
   mandateId: string,
 ): Promise<MandateObjectInfo> {
-  const response = await fetch("https://fullnode.testnet.sui.io:443", {
+  const response = await fetch(activeRpcUrl(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -176,7 +200,7 @@ async function fetchMandateObjectInfo(
 }
 
 async function fetchCoinObjectInfo(objectId: string): Promise<CoinObjectInfo> {
-  const response = await fetch("https://fullnode.testnet.sui.io:443", {
+  const response = await fetch(activeRpcUrl(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -592,11 +616,15 @@ async function main() {
   const mandateId = requireSuiAddressEnv("MANDATE_ID");
 
   const routeId = process.env.ROUTE_ID ?? "deep_momentum_buy";
+  const networkSuffix = activeNetwork().toUpperCase();
   const poolKey =
     process.env.POOL_KEY ??
+    process.env[`NEXT_PUBLIC_DEEPBOOK_POOL_KEY_${networkSuffix}`] ??
     (routeId === "sui_momentum_buy" ? "SUI_DUSDC" : "DEEP_SUI");
   const poolId =
-    process.env.DEEPBOOK_POOL_ID ?? process.env.NEXT_PUBLIC_DEEPBOOK_POOL_ID;
+    process.env.DEEPBOOK_POOL_ID ??
+    process.env[`NEXT_PUBLIC_DEEPBOOK_POOL_ID_${networkSuffix}`] ??
+    process.env.NEXT_PUBLIC_DEEPBOOK_POOL_ID;
   const amountSui = process.env.AMOUNT_SUI ?? "0.001";
   const strategy = process.env.STRATEGY ?? "normal";
   const minOut = Number(process.env.MIN_OUT ?? "0");
@@ -622,7 +650,7 @@ async function main() {
   }
   if (!poolId || !isValidSuiAddress(poolId)) {
     throw new Error(
-      "DeepBook swap unavailable; fallback transfer disabled. Missing NEXT_PUBLIC_DEEPBOOK_POOL_ID / DEEPBOOK_POOL_ID.",
+      "DeepBook swap unavailable; fallback transfer disabled. Missing current network DeepBook pool id.",
     );
   }
 
@@ -676,8 +704,8 @@ async function main() {
   }
 
   const client = new SuiGrpcClient({
-    network: "testnet",
-    baseUrl: "https://fullnode.testnet.sui.io:443",
+    network: activeNetwork(),
+    baseUrl: activeRpcUrl(),
   }).$extend(deepbook({ address: agentAddress }));
 
   const tx = new Transaction();

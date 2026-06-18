@@ -2,9 +2,9 @@ import { deepbook, mainnetCoins, mainnetPools, testnetCoins, testnetPools } from
 import { SuiGrpcClient } from "@mysten/sui/grpc"
 import {
   BACKEND_AGENT_ADDRESS,
-  DEEPBOOK_POOL_ID,
-  DEEPBOOK_POOL_KEY,
   NETWORK,
+  getActiveDeepBookRouteConfig,
+  getRpcUrl,
   normalizeSuiAddress,
 } from "@/lib/chain-config"
 import {
@@ -49,40 +49,34 @@ function sourceParam(value: string | null): SignalSourceId | null {
 }
 
 function fullnodeUrl() {
-  if (NETWORK === "mainnet") {
-    return "https://fullnode.mainnet.sui.io:443"
-  }
-  return "https://fullnode.testnet.sui.io:443"
+  return getRpcUrl()
 }
 
 function deepbookConfig() {
-  if (NETWORK !== "testnet" && NETWORK !== "mainnet") {
-    throw new Error(`DeepBook quote source only supports testnet/mainnet, got ${NETWORK}`)
-  }
-
+  const route = getActiveDeepBookRouteConfig()
   const pools = NETWORK === "mainnet" ? mainnetPools : testnetPools
   const coins = NETWORK === "mainnet" ? mainnetCoins : testnetCoins
-  const pool = pools[DEEPBOOK_POOL_KEY]
+  const pool = pools[route.poolKey]
 
-  if (!DEEPBOOK_POOL_ID) {
-    throw new Error("pool config missing: NEXT_PUBLIC_DEEPBOOK_POOL_ID is required")
+  if (!route.poolId) {
+    throw new Error("pool config missing: Route is not configured for current network.")
   }
   if (!pool) {
-    throw new Error(`pool config missing: ${DEEPBOOK_POOL_KEY} is not in DeepBook SDK ${NETWORK} pools`)
+    throw new Error(`pool config missing: ${route.poolKey} is not in DeepBook SDK ${NETWORK} pools`)
   }
-  if (normalizeSuiAddress(pool.address) !== normalizeSuiAddress(DEEPBOOK_POOL_ID)) {
+  if (normalizeSuiAddress(pool.address) !== normalizeSuiAddress(route.poolId)) {
     throw new Error(
-      `pool config mismatch: ${DEEPBOOK_POOL_KEY} SDK pool id ${pool.address} does not match NEXT_PUBLIC_DEEPBOOK_POOL_ID ${DEEPBOOK_POOL_ID}`
+      `pool config mismatch: ${route.poolKey} SDK pool id ${pool.address} does not match configured pool id ${route.poolId}`
     )
   }
 
   const baseCoin = coins[pool.baseCoin]
   const quoteCoin = coins[pool.quoteCoin]
   if (!baseCoin || !quoteCoin) {
-    throw new Error(`pool config missing coin metadata for ${DEEPBOOK_POOL_KEY}`)
+    throw new Error(`pool config missing coin metadata for ${route.poolKey}`)
   }
 
-  return { coins, pool, baseCoin, quoteCoin }
+  return { coins, pool, baseCoin, quoteCoin, route }
 }
 
 function normalizeCoinType(type: string) {
@@ -95,13 +89,13 @@ function normalizeCoinType(type: string) {
 }
 
 async function quoteSuiInput(inputAmountSui: number) {
-  const { pool, baseCoin, quoteCoin } = deepbookConfig()
+  const { pool, baseCoin, quoteCoin, route } = deepbookConfig()
   const suiType = `${normalizeSuiAddress("0x2")}::sui::SUI`
   const baseIsSui = normalizeCoinType(baseCoin.type).toLowerCase() === suiType.toLowerCase()
   const quoteIsSui = normalizeCoinType(quoteCoin.type).toLowerCase() === suiType.toLowerCase()
 
   if (!baseIsSui && !quoteIsSui) {
-    throw new Error(`${DEEPBOOK_POOL_KEY} does not support SUI input`)
+    throw new Error(`${route.poolKey} does not support SUI input`)
   }
 
   const client = new SuiGrpcClient({
@@ -110,7 +104,7 @@ async function quoteSuiInput(inputAmountSui: number) {
   }).$extend(deepbook({ address: BACKEND_AGENT_ADDRESS }))
 
   if (quoteIsSui) {
-    const quote = await client.deepbook.getBaseQuantityOut(DEEPBOOK_POOL_KEY, inputAmountSui)
+    const quote = await client.deepbook.getBaseQuantityOut(route.poolKey, inputAmountSui)
     return {
       market: `${pool.baseCoin}/${pool.quoteCoin}`,
       inputAsset: pool.quoteCoin,
@@ -121,7 +115,7 @@ async function quoteSuiInput(inputAmountSui: number) {
     }
   }
 
-  const quote = await client.deepbook.getQuoteQuantityOut(DEEPBOOK_POOL_KEY, inputAmountSui)
+  const quote = await client.deepbook.getQuoteQuantityOut(route.poolKey, inputAmountSui)
   return {
     market: `${pool.baseCoin}/${pool.quoteCoin}`,
     inputAsset: pool.baseCoin,
@@ -242,8 +236,8 @@ export async function GET(request: Request) {
         market: deepbookQuote.market,
         targetAsset: deepbookQuote.outputAsset,
         quoteAsset: deepbookQuote.inputAsset,
-        poolKey: DEEPBOOK_POOL_KEY,
-        poolId: DEEPBOOK_POOL_ID,
+        poolKey: getActiveDeepBookRouteConfig().poolKey,
+        poolId: getActiveDeepBookRouteConfig().poolId,
         inputAsset: deepbookQuote.inputAsset,
         outputAsset: deepbookQuote.outputAsset,
         inputAmount: deepbookQuote.inputAmount,
@@ -317,8 +311,8 @@ export async function GET(request: Request) {
       market: activeSource.market,
       targetAsset: activeSource.targetAsset,
       quoteAsset: activeSource.quoteAsset,
-      poolKey: activeSource.source === "deepbook_quote" ? DEEPBOOK_POOL_KEY : undefined,
-      poolId: activeSource.source === "deepbook_quote" ? DEEPBOOK_POOL_ID : undefined,
+      poolKey: activeSource.source === "deepbook_quote" ? getActiveDeepBookRouteConfig().poolKey : undefined,
+      poolId: activeSource.source === "deepbook_quote" ? getActiveDeepBookRouteConfig().poolId : undefined,
       inputAsset: activeSource.source === "deepbook_quote" ? "SUI" : undefined,
       outputAsset: activeSource.source === "deepbook_quote" ? "DEEP" : undefined,
       inputAmount: activeSource.source === "deepbook_quote" ? inputAmount : undefined,

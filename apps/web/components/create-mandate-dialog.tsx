@@ -317,9 +317,7 @@ export function CreateMandateDialog({
   const disabledReasons = [
     !account?.address ? "wallet not connected" : null,
     !label.trim() ? "label missing" : null,
-    PACKAGE_ID_SOURCE !== "NEXT_PUBLIC_PACKAGE_ID"
-      ? "package id missing"
-      : null,
+    !IS_PUBLIC_PACKAGE_ID_CONFIGURED ? "package id missing" : null,
     IS_LEGACY_POLICY_PACKAGE_ID ? "legacy package" : null,
     !IS_BACKEND_AGENT_ADDRESS_CONFIGURED
       ? "backend agent address missing"
@@ -387,7 +385,7 @@ export function CreateMandateDialog({
     try {
       if (!IS_PUBLIC_PACKAGE_ID_CONFIGURED) {
         throw new Error(
-          "NEXT_PUBLIC_PACKAGE_ID is not loaded in the frontend bundle. Update root .env.local and restart Next.js from the repository root.",
+          "NEXT_PUBLIC_PACKAGE_ID_TESTNET or NEXT_PUBLIC_PACKAGE_ID_MAINNET is not loaded in the frontend bundle. Update root .env.local and restart Next.js from the repository root.",
         );
       }
 
@@ -399,7 +397,7 @@ export function CreateMandateDialog({
 
       if (IS_LEGACY_POLICY_PACKAGE_ID) {
         throw new Error(
-          "PACKAGE_ID still points to a legacy policy-only package. Publish the vault package, update NEXT_PUBLIC_PACKAGE_ID/PACKAGE_ID, and restart Next.js.",
+          "PACKAGE_ID still points to a legacy policy-only package. Publish the vault package, update the current network package id, and restart Next.js.",
         );
       }
 
@@ -684,10 +682,10 @@ export function CreateMandateDialog({
               </div>
             )}
 
-            {account && PACKAGE_ID_SOURCE !== "NEXT_PUBLIC_PACKAGE_ID" && (
+            {account && !IS_PUBLIC_PACKAGE_ID_CONFIGURED && (
               <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                NEXT_PUBLIC_PACKAGE_ID is not loaded in the frontend bundle.
-                Restart Next.js from the repository root after updating
+                Current network package id is not loaded in the frontend
+                bundle. Restart Next.js from the repository root after updating
                 .env.local.
               </div>
             )}

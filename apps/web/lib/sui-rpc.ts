@@ -2,14 +2,13 @@
 
 import {
   SuiJsonRpcClient,
-  getJsonRpcFullnodeUrl,
 } from "@mysten/sui/jsonRpc"
 import type {
   SuiEvent,
   SuiObjectResponse,
   SuiTransactionBlockResponse,
 } from "@mysten/sui/jsonRpc"
-import { NETWORK, PACKAGE_ID } from "@/lib/chain-config"
+import { NETWORK, PACKAGE_ID, getRpcUrl } from "@/lib/chain-config"
 
 export const MANDATE_EVENT_TYPES = {
   created: `${PACKAGE_ID}::mandate::CreatedEvent`,
@@ -26,7 +25,7 @@ export function getSuiRpcClient() {
   if (!rpcClient) {
     rpcClient = new SuiJsonRpcClient({
       network: NETWORK,
-      url: getJsonRpcFullnodeUrl(NETWORK),
+      url: getRpcUrl(),
     })
   }
 

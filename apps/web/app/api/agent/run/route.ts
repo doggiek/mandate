@@ -7,6 +7,11 @@ import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import {
   LEGACY_POLICY_PACKAGE_IDS,
   BACKEND_AGENT_ADDRESS,
+  getActiveDeepBookRouteConfig,
+  getPackageId,
+  getRpcUrl,
+  getSuiNetwork,
+  type SuiNetwork,
 } from "@/lib/chain-config";
 import { defaultTradingRoute, tradingRouteById } from "@/lib/trading-routes";
 
@@ -92,6 +97,10 @@ function runtimeEnvValue(name: string, repoRoot: string) {
   );
 }
 
+function runtimeEnvReader(repoRoot: string) {
+  return (name: string) => runtimeEnvValue(name, repoRoot);
+}
+
 function findRepoRoot() {
   const cwd = process.cwd();
   const candidates = [cwd, path.resolve(cwd, "../.."), path.resolve(cwd, "..")];
@@ -103,30 +112,16 @@ function findRepoRoot() {
   );
 }
 
-function runtimePackageId(repoRoot: string) {
-  const serverPackageId = runtimeEnvValue("PACKAGE_ID", repoRoot);
-  const publicPackageId = runtimeEnvValue("NEXT_PUBLIC_PACKAGE_ID", repoRoot);
+function runtimePackageId(repoRoot: string, network: SuiNetwork) {
+  const env = runtimeEnvReader(repoRoot);
+  const packageId = getPackageId(network, env);
 
-  if (!serverPackageId && !publicPackageId) {
-    throw new Error(
-      "PACKAGE_ID is not configured. Set PACKAGE_ID and NEXT_PUBLIC_PACKAGE_ID in .env.local, then restart Next.js.",
-    );
-  }
-
-  if (
-    serverPackageId &&
-    publicPackageId &&
-    serverPackageId.toLowerCase() !== publicPackageId.toLowerCase()
-  ) {
-    throw new Error(
-      "PACKAGE_ID and NEXT_PUBLIC_PACKAGE_ID do not match. Update .env.local so frontend and backend use the same Mandate package.",
-    );
-  }
-
-  const packageId = serverPackageId ?? publicPackageId;
   if (!packageId) {
-    throw new Error("PACKAGE_ID is not configured.");
+    throw new Error(
+      `Package id is not configured for ${network}. Set NEXT_PUBLIC_PACKAGE_ID_${network.toUpperCase()} in .env.local, then restart Next.js.`,
+    );
   }
+
   if (
     LEGACY_POLICY_PACKAGE_IDS.some(
       (legacyPackageId) =>
@@ -134,12 +129,12 @@ function runtimePackageId(repoRoot: string) {
     )
   ) {
     throw new Error(
-      "PACKAGE_ID points to a legacy policy-only package. Publish the vault package, update PACKAGE_ID/NEXT_PUBLIC_PACKAGE_ID, and restart Next.js.",
+      "PACKAGE_ID points to a legacy policy-only package. Publish the vault package, update the current network package id, and restart Next.js.",
     );
   }
 
   if (process.env.NODE_ENV !== "production" && !loggedPackageId) {
-    console.info(`[MANDATE] API using PACKAGE_ID ${packageId}`);
+    console.info(`[MANDATE] API using ${network} PACKAGE_ID ${packageId}`);
     loggedPackageId = true;
   }
 
@@ -179,40 +174,26 @@ function runtimeBackendAgentAddress(repoRoot: string) {
   );
 }
 
-function routePoolIdEnvNames(routeId: string) {
-  if (routeId === "sui_momentum_buy") {
-    return [
-      "NEXT_PUBLIC_DEEPBOOK_POOL_ID_SUI_DBUSDC",
-      "NEXT_PUBLIC_DEEPBOOK_POOL_ID_SUI_DUSDC",
-      "DEEPBOOK_POOL_ID_SUI_DBUSDC",
-      "DEEPBOOK_POOL_ID_SUI_DUSDC",
-    ];
-  }
-
-  return [
-    "NEXT_PUBLIC_DEEPBOOK_POOL_ID_DEEP_SUI",
-    "NEXT_PUBLIC_DEEPBOOK_POOL_ID",
-    "DEEPBOOK_POOL_ID",
-  ];
-}
-
-function runtimeDeepBookPoolId(
+function runtimeDeepBookRouteConfig(
   repoRoot: string,
+  network: SuiNetwork,
   routeId: string,
   configuredPoolId: string,
 ) {
-  const poolId =
-    routePoolIdEnvNames(routeId)
-      .map((name) => runtimeEnvValue(name, repoRoot))
-      .find(Boolean) ?? configuredPoolId;
+  const activeRoute = getActiveDeepBookRouteConfig(
+    network,
+    runtimeEnvReader(repoRoot),
+  );
+  const poolId = activeRoute.poolId || configuredPoolId;
+  const poolKey = activeRoute.poolKey;
 
   if (!poolId) {
     throw new Error(
-      `DeepBook swap unavailable; fallback transfer disabled. Missing pool id for route ${routeId}.`,
+      `DeepBook swap unavailable; fallback transfer disabled. Route is not configured for current network (${network}).`,
     );
   }
 
-  return poolId;
+  return { ...activeRoute, poolId, poolKey };
 }
 
 function assertBackendAgentMatchesSigner(
@@ -274,23 +255,16 @@ function mandateObjectMatchesRoute(
   return Boolean(objectType?.endsWith("::mandate::Mandate"));
 }
 
-function fullnodeUrl() {
-  const network =
-    runtimeEnvValue("NEXT_PUBLIC_SUI_NETWORK", findRepoRoot()) ?? "testnet";
-  if (network === "mainnet") {
-    return "https://fullnode.mainnet.sui.io:443";
-  }
-  if (network === "devnet") {
-    return "https://fullnode.devnet.sui.io:443";
-  }
-  if (network === "localnet") {
-    return "http://127.0.0.1:9000";
-  }
-  return "https://fullnode.testnet.sui.io:443";
+function fullnodeUrl(repoRoot: string, network: SuiNetwork) {
+  return getRpcUrl(network, runtimeEnvReader(repoRoot));
 }
 
-async function fetchMandateObjectType(mandateId: string) {
-  const response = await fetch(fullnodeUrl(), {
+async function fetchMandateObjectType(
+  mandateId: string,
+  repoRoot: string,
+  network: SuiNetwork,
+) {
+  const response = await fetch(fullnodeUrl(repoRoot, network), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -512,9 +486,11 @@ export async function POST(request: Request) {
   let amountSui: string;
   let blockedReason: string | undefined;
   let packageId: string;
+  let network: SuiNetwork;
   let agentPrivateKey: string;
   let backendAgentAddress: string;
   let deepBookPoolId: string;
+  let deepBookPoolKey: string;
   let tradingRoute: ReturnType<typeof requestTradingRoute>;
 
   try {
@@ -523,14 +499,18 @@ export async function POST(request: Request) {
     amountSui = requestAmountSui(body);
     blockedReason = requestBlockedReason(body);
     tradingRoute = requestTradingRoute(body);
-    packageId = runtimePackageId(repoRoot);
+    network = getSuiNetwork(runtimeEnvReader(repoRoot));
+    packageId = runtimePackageId(repoRoot, network);
     agentPrivateKey = runtimeAgentPrivateKey(repoRoot);
     backendAgentAddress = runtimeBackendAgentAddress(repoRoot);
-    deepBookPoolId = runtimeDeepBookPoolId(
+    const routeConfig = runtimeDeepBookRouteConfig(
       repoRoot,
+      network,
       tradingRoute.id,
       tradingRoute.action.poolId,
     );
+    deepBookPoolId = routeConfig.poolId;
+    deepBookPoolKey = routeConfig.poolKey;
     assertBackendAgentMatchesSigner(backendAgentAddress, agentPrivateKey);
   } catch (caught) {
     const error = caught instanceof Error ? caught.message : String(caught);
@@ -544,14 +524,19 @@ export async function POST(request: Request) {
     strategy: requestStrategy(body),
     routeId: tradingRoute.id,
     packageId,
-    poolKey: tradingRoute.action.poolKey,
+    network,
+    poolKey: deepBookPoolKey,
     poolId: deepBookPoolId,
     spendAsset: tradingRoute.action.spendAsset,
     buyAsset: tradingRoute.action.buyAsset,
   });
 
   try {
-    const { objectType, owner } = await fetchMandateObjectType(mandateId);
+    const { objectType, owner } = await fetchMandateObjectType(
+      mandateId,
+      repoRoot,
+      network,
+    );
     if (!isCurrentMandateObjectType(objectType, packageId)) {
       return Response.json(
         {
@@ -607,10 +592,12 @@ export async function POST(request: Request) {
           AGENT_PRIVATE_KEY: agentPrivateKey,
           PACKAGE_ID: packageId,
           NEXT_PUBLIC_PACKAGE_ID: packageId,
+          NEXT_PUBLIC_SUI_NETWORK: network,
+          SUI_RPC_URL: fullnodeUrl(repoRoot, network),
           NEXT_PUBLIC_BACKEND_AGENT_ADDRESS: backendAgentAddress,
           MANDATE_ID: mandateId,
           ROUTE_ID: tradingRoute.id,
-          POOL_KEY: tradingRoute.action.poolKey,
+          POOL_KEY: deepBookPoolKey,
           DEEPBOOK_POOL_ID: deepBookPoolId,
           NEXT_PUBLIC_DEEPBOOK_POOL_ID: deepBookPoolId,
           NEXT_PUBLIC_DBUSDC_COIN_TYPE: DUSDCCoinType,
@@ -633,7 +620,8 @@ export async function POST(request: Request) {
       amountSui,
       packageId,
       routeId: tradingRoute.id,
-      poolKey: tradingRoute.action.poolKey,
+      network,
+      poolKey: deepBookPoolKey,
       poolId: deepBookPoolId,
       status: executionLogStatus(result),
     });
@@ -657,7 +645,8 @@ export async function POST(request: Request) {
       amountSui,
       packageId,
       routeId: tradingRoute.id,
-      poolKey: tradingRoute.action.poolKey,
+      network,
+      poolKey: deepBookPoolKey,
       poolId: deepBookPoolId,
       status: executionLogStatus(result),
     });

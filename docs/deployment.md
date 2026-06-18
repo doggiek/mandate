@@ -20,11 +20,34 @@ UPGRADE_CAP_ID=<upgrade-cap-object-id> npm run contract:upgrade:testnet
 npm run contract:extract-package -- contracts/deployments/testnet/latest-upgrade.json
 ```
 
-Update both runtime configs with the extracted value:
+Update the package id for the active network:
 
 ```bash
-NEXT_PUBLIC_PACKAGE_ID=<package_id>
-PACKAGE_ID=<package_id>
+NEXT_PUBLIC_SUI_NETWORK=testnet
+NEXT_PUBLIC_PACKAGE_ID_TESTNET=<package_id>
+```
+
+For mainnet deployments, set `NEXT_PUBLIC_SUI_NETWORK=mainnet` and configure
+`NEXT_PUBLIC_PACKAGE_ID_MAINNET` plus the mainnet DeepBook route and explorer
+variables. Switching networks is env-only: update the root `.env.local` or
+deployment environment, then restart or redeploy. No code changes are required.
+
+Network-scoped route variables:
+
+```bash
+NEXT_PUBLIC_SUI_RPC_TESTNET=
+NEXT_PUBLIC_DEEPBOOK_POOL_KEY_TESTNET=DEEP_SUI
+NEXT_PUBLIC_DEEPBOOK_POOL_ID_TESTNET=
+NEXT_PUBLIC_SPEND_COIN_TYPE_TESTNET=0x2::sui::SUI
+NEXT_PUBLIC_BUY_COIN_TYPE_TESTNET=
+NEXT_PUBLIC_EXPLORER_BASE_URL_TESTNET=https://testnet.suivision.xyz
+
+NEXT_PUBLIC_SUI_RPC_MAINNET=
+NEXT_PUBLIC_DEEPBOOK_POOL_KEY_MAINNET=
+NEXT_PUBLIC_DEEPBOOK_POOL_ID_MAINNET=
+NEXT_PUBLIC_SPEND_COIN_TYPE_MAINNET=0x2::sui::SUI
+NEXT_PUBLIC_BUY_COIN_TYPE_MAINNET=
+NEXT_PUBLIC_EXPLORER_BASE_URL_MAINNET=https://suivision.xyz
 ```
 
 Configure the backend Agent signer:

@@ -1,3 +1,8 @@
+import {
+  getActiveDeepBookRouteConfig,
+  getTestUsdcRouteConfig,
+} from "@/lib/chain-config";
+
 export type TradingRouteId = "deep_momentum_buy" | "sui_momentum_buy";
 export type SignalSourceId = "deepbook_quote" | "sui_price";
 
@@ -27,24 +32,10 @@ export type TradingRoute = {
   };
 };
 
-const deepSuiPoolKey =
-  process.env.NEXT_PUBLIC_DEEPBOOK_POOL_KEY_DEEP_SUI ??
-  process.env.NEXT_PUBLIC_DEEPBOOK_POOL_KEY ??
-  "DEEP_SUI";
-const deepSuiPoolId =
-  process.env.NEXT_PUBLIC_DEEPBOOK_POOL_ID_DEEP_SUI ??
-  process.env.NEXT_PUBLIC_DEEPBOOK_POOL_ID ??
-  "";
-const suiDUSDCPoolKey =
-  process.env.NEXT_PUBLIC_DEEPBOOK_POOL_KEY_SUI_DBUSDC ??
-  process.env.NEXT_PUBLIC_DEEPBOOK_POOL_KEY_SUI_DUSDC ??
-  "SUI_DUSDC";
-const suiDUSDCPoolId =
-  process.env.NEXT_PUBLIC_DEEPBOOK_POOL_ID_SUI_DBUSDC ??
-  process.env.NEXT_PUBLIC_DEEPBOOK_POOL_ID_SUI_DUSDC ??
-  "";
-const TEST_USDC_ROUTE_UNAVAILABLE_REASON =
-  "USDC route unavailable on the current DeepBook network.";
+const activeDeepBookRoute = getActiveDeepBookRouteConfig();
+const deepSuiPoolKey = activeDeepBookRoute.poolKey;
+const deepSuiPoolId = activeDeepBookRoute.poolId;
+const testUsdcRoute = getTestUsdcRouteConfig();
 
 export const TRADING_ROUTES: TradingRoute[] = [
   {
@@ -69,10 +60,8 @@ export const TRADING_ROUTES: TradingRoute[] = [
       inputDecimals: 9,
       outputDecimals: 6,
       executionAmount: 1,
-      executable: Boolean(deepSuiPoolId),
-      unavailableReason: deepSuiPoolId
-        ? undefined
-        : "DEEP_SUI route missing pool id.",
+      executable: activeDeepBookRoute.configured,
+      unavailableReason: activeDeepBookRoute.unavailableReason,
     },
   },
   {
@@ -92,13 +81,13 @@ export const TRADING_ROUTES: TradingRoute[] = [
       type: "buy",
       spendAsset: "DUSDC",
       buyAsset: "SUI",
-      poolKey: suiDUSDCPoolKey,
-      poolId: suiDUSDCPoolId,
+      poolKey: testUsdcRoute.poolKey,
+      poolId: testUsdcRoute.poolId,
       inputDecimals: 6,
       outputDecimals: 9,
       executionAmount: 1,
       executable: false,
-      unavailableReason: TEST_USDC_ROUTE_UNAVAILABLE_REASON,
+      unavailableReason: testUsdcRoute.unavailableReason,
     },
   },
 ];

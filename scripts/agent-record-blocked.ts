@@ -13,6 +13,30 @@ const MIST_PER_SUI = 1_000_000_000n;
 const DEFAULT_BACKEND_AGENT_ADDRESS =
   "0x91dc52b575b3cd5703be07ee65e12b5af3a25d927b16fa8f94811b7b773ad8b2";
 
+type SuiNetwork = "testnet" | "mainnet";
+
+function activeNetwork(): SuiNetwork {
+  const value = (
+    process.env.NEXT_PUBLIC_SUI_NETWORK ??
+    process.env.NEXT_PUBLIC_NETWORK ??
+    "testnet"
+  ).toLowerCase();
+
+  return value === "mainnet" ? "mainnet" : "testnet";
+}
+
+function activeRpcUrl() {
+  const network = activeNetwork();
+  const suffix = network.toUpperCase();
+  return (
+    process.env.SUI_RPC_URL ??
+    process.env[`NEXT_PUBLIC_SUI_RPC_${suffix}`] ??
+    (network === "mainnet"
+      ? "https://fullnode.mainnet.sui.io:443"
+      : "https://fullnode.testnet.sui.io:443")
+  );
+}
+
 type TransactionLike = {
   digest?: string;
   status?: {
@@ -255,8 +279,8 @@ async function main() {
     );
   }
   const client = new SuiGrpcClient({
-    network: "testnet",
-    baseUrl: "https://fullnode.testnet.sui.io:443",
+    network: activeNetwork(),
+    baseUrl: activeRpcUrl(),
   });
 
   const tx = new Transaction();

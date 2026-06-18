@@ -1,13 +1,14 @@
 import { ExternalLink } from "lucide-react"
 
+import { getExplorerBaseUrl } from "@/lib/chain-config"
 import { cn } from "@/lib/utils"
 
 export function transactionUrl(digest: string) {
-  return `https://testnet.suivision.xyz/txblock/${digest}`
+  return `${getExplorerBaseUrl()}/txblock/${digest}`
 }
 
 export function objectUrl(objectId: string) {
-  return `https://testnet.suivision.xyz/object/${objectId}`
+  return `${getExplorerBaseUrl()}/object/${objectId}`
 }
 
 export function ExplorerLink({

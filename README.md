@@ -117,12 +117,20 @@ Core variables:
 
 ```bash
 NEXT_PUBLIC_SUI_NETWORK=testnet
-PACKAGE_ID=
-NEXT_PUBLIC_PACKAGE_ID=
+NEXT_PUBLIC_PACKAGE_ID_TESTNET=
+NEXT_PUBLIC_PACKAGE_ID_MAINNET=
+NEXT_PUBLIC_DEEPBOOK_POOL_KEY_TESTNET=DEEP_SUI
+NEXT_PUBLIC_DEEPBOOK_POOL_ID_TESTNET=
+NEXT_PUBLIC_SPEND_COIN_TYPE_TESTNET=0x2::sui::SUI
+NEXT_PUBLIC_BUY_COIN_TYPE_TESTNET=
+NEXT_PUBLIC_EXPLORER_BASE_URL_TESTNET=https://testnet.suivision.xyz
+NEXT_PUBLIC_DEEPBOOK_POOL_KEY_MAINNET=
+NEXT_PUBLIC_DEEPBOOK_POOL_ID_MAINNET=
+NEXT_PUBLIC_SPEND_COIN_TYPE_MAINNET=0x2::sui::SUI
+NEXT_PUBLIC_BUY_COIN_TYPE_MAINNET=
+NEXT_PUBLIC_EXPLORER_BASE_URL_MAINNET=https://suivision.xyz
 BACKEND_AGENT_PRIVATE_KEY=
 NEXT_PUBLIC_BACKEND_AGENT_ADDRESS=
-NEXT_PUBLIC_DEEPBOOK_POOL_KEY_DEEP_SUI=DEEP_SUI
-NEXT_PUBLIC_DEEPBOOK_POOL_ID_DEEP_SUI=
 ```
 
 `BACKEND_AGENT_PRIVATE_KEY` is the platform backend Agent signer. It pays gas
@@ -149,9 +157,11 @@ UPGRADE_CAP_ID=<upgrade-cap-object-id> npm run contract:upgrade:testnet
 npm run contract:extract-package
 ```
 
-After publishing a new package, update both `PACKAGE_ID` and
-`NEXT_PUBLIC_PACKAGE_ID`, restart Next.js, and create a fresh Mandate object for
-the new package.
+After publishing a new package, update `NEXT_PUBLIC_PACKAGE_ID_TESTNET`,
+restart Next.js, and create a fresh Mandate object for the new package.
+Switching between testnet and mainnet only requires changing
+`NEXT_PUBLIC_SUI_NETWORK` and the matching network-scoped env values, then
+restarting or redeploying. No code changes are required.
 
 ## Known Testnet Limitations
 
