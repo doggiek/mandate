@@ -69,7 +69,7 @@ export function Hero() {
         <div>
           <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-3 py-1 text-xs text-muted-foreground backdrop-blur">
             <span className="size-1.5 rounded-full bg-primary" />
-            Autonomous Agent Wallet · Sui
+            Programmable Permission Layer · Sui
           </div>
 
           <h1 className="mt-6 text-balance text-4xl font-medium leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">

@@ -1,34 +1,34 @@
-import { Analytics } from '@vercel/analytics/next'
-import type { Metadata } from 'next'
-import { Providers } from '@/components/providers'
-import './globals.css'
+import { Analytics } from "@vercel/analytics/next";
+import type { Metadata } from "next";
+import { Providers } from "@/components/providers";
+import "./globals.css";
 
 export const metadata: Metadata = {
-  title: 'Mandate',
+  title: "Mandate · Programmable Permission Layer",
   description:
-    'Mandate lets you grant AI agents limited, revocable spending authority on Sui — with budget ceilings, protocol restrictions, and expiration windows.',
+    "A programmable permission layer for autonomous agent wallets on Sui. Sign once, execute many times.",
   icons: {
     icon: [
       {
-        url: '/brand/mandate-logo-dark.png',
-        type: 'image/png',
+        url: "/brand/mandate-logo-dark.png",
+        type: "image/png",
       },
     ],
-    apple: '/brand/mandate-logo-dark.png',
+    apple: "/brand/mandate-logo-dark.png",
   },
-}
+};
 
 export default function RootLayout({
   children,
 }: Readonly<{
-  children: React.ReactNode
+  children: React.ReactNode;
 }>) {
   return (
     <html lang="en" className="dark bg-background">
       <body className="font-sans antialiased">
         <Providers>{children}</Providers>
-        {process.env.NODE_ENV === 'production' && <Analytics />}
+        {process.env.NODE_ENV === "production" && <Analytics />}
       </body>
     </html>
-  )
+  );
 }
