@@ -1,7 +1,7 @@
-"use client"
+"use client";
 
-import * as React from "react"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import * as React from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Card,
   CardAction,
@@ -9,7 +9,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card"
+} from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -17,17 +17,21 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
-import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
-import { ActivityFeed } from "@/components/activity-feed"
-import { shortId } from "@/components/copyable-id"
-import { Skeleton } from "@/components/ui/skeleton"
-import { sortActivitiesByTimeDesc } from "@/lib/activity-utils"
-import { useMandateStore } from "@/lib/mandate-store"
-import type { ActivityKind, MandateStatus } from "@/lib/mandate-data"
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
-import { cn } from "@/lib/utils"
+} from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { ActivityFeed } from "@/components/activity-feed";
+import { MandateFilter } from "@/components/mandate-filter";
+import { shortId } from "@/components/copyable-id";
+import { Skeleton } from "@/components/ui/skeleton";
+import { sortActivitiesByTimeDesc } from "@/lib/activity-utils";
+import { useMandateStore } from "@/lib/mandate-store";
+import type { ActivityKind } from "@/lib/mandate-data";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
 
 const KIND_FILTERS: { value: string; label: string }[] = [
   { value: "all", label: "All events" },
@@ -36,9 +40,9 @@ const KIND_FILTERS: { value: string; label: string }[] = [
   { value: "mandate.created", label: "Created" },
   { value: "mandate.revoked", label: "Revoked" },
   { value: "mandate.withdrawn", label: "Withdrawn" },
-]
+];
 
-const PAGE_SIZE = 20
+const PAGE_SIZE = 20;
 
 function ActivityListSkeleton() {
   return (
@@ -54,160 +58,79 @@ function ActivityListSkeleton() {
         </div>
       ))}
     </div>
-  )
-}
-
-function statusDot(status: MandateStatus) {
-  if (status === "active") return "bg-emerald-400"
-  if (status === "revoked") return "bg-destructive"
-  return "bg-muted-foreground"
+  );
 }
 
 export function ActivityView() {
-  const router = useRouter()
-  const pathname = usePathname()
-  const searchParams = useSearchParams()
-  const { activity, mandates, loading, error, isWalletScoped } = useMandateStore()
-  const [kind, setKind] = React.useState<string>("all")
-  const [mandateId, setMandateId] = React.useState("all")
-  const [mandateQuery, setMandateQuery] = React.useState("")
-  const [mandateOpen, setMandateOpen] = React.useState(false)
-  const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE)
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const { activity, mandates, loading, error, isWalletScoped } =
+    useMandateStore();
+  const [kind, setKind] = React.useState<string>("all");
+  const [mandateId, setMandateId] = React.useState("all");
+  const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE);
 
-  const selectedMandate = mandates.find((mandate) => mandate.id === mandateId)
-  const queryMandateId = searchParams.get("mandateId")
-  const mandateOptions = React.useMemo(() => {
-    const query = mandateQuery.trim().toLowerCase()
-    return mandates.filter((mandate) => {
-      if (!query) return true
-      return (
-        mandate.label.toLowerCase().includes(query) ||
-        mandate.id.toLowerCase().includes(query)
-      )
-    })
-  }, [mandateQuery, mandates])
-
+  const selectedMandate = mandates.find((mandate) => mandate.id === mandateId);
+  const queryMandateId = searchParams.get("mandateId");
   const filtered = sortActivitiesByTimeDesc(
     activity.filter((event) => {
       if (kind !== "all" && event.kind !== (kind as ActivityKind)) {
-        return false
+        return false;
       }
 
       if (mandateId !== "all" && event.mandateId !== mandateId) {
-        return false
+        return false;
       }
 
-      return true
-    })
-  )
-  const visibleEvents = filtered.slice(0, visibleCount)
+      return true;
+    }),
+  );
+  const visibleEvents = filtered.slice(0, visibleCount);
 
   React.useEffect(() => {
-    setVisibleCount(PAGE_SIZE)
-  }, [kind, mandateId])
+    setVisibleCount(PAGE_SIZE);
+  }, [kind, mandateId]);
 
   React.useEffect(() => {
     if (!queryMandateId) {
-      return
+      return;
     }
     if (!mandates.some((mandate) => mandate.id === queryMandateId)) {
-      return
+      return;
     }
-    setMandateId(queryMandateId)
-  }, [mandates, queryMandateId])
+    setMandateId(queryMandateId);
+  }, [mandates, queryMandateId]);
 
   const clearMandateFilter = React.useCallback(() => {
-    setMandateId("all")
-    setMandateQuery("")
+    setMandateId("all");
     if (searchParams.get("mandateId")) {
-      router.replace(pathname)
+      router.replace(pathname);
     }
-  }, [pathname, router, searchParams])
+  }, [pathname, router, searchParams]);
 
   return (
     <Card>
       <CardHeader className="border-b border-border">
-        <CardTitle>Event stream</CardTitle>
+        <CardTitle>Event Stream</CardTitle>
         <CardDescription>
-          Immutable, attributable record of every agent action
+          Immutable, attributable record of mandate activity.
         </CardDescription>
         <CardAction className="flex flex-wrap items-center gap-2">
-          <div className="relative flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setMandateOpen((open) => !open)}
-              className="w-[250px] justify-start overflow-hidden text-left"
-            >
-              <span className="truncate">
-                {selectedMandate
-                  ? `${selectedMandate.label} (${shortId(selectedMandate.id)})`
-                  : "All mandates"}
-              </span>
-            </Button>
-            {mandateId !== "all" && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={clearMandateFilter}
-              >
-                Clear
-              </Button>
-            )}
-            {mandateOpen && (
-              <div className="absolute right-0 top-9 z-50 w-[320px] rounded-lg border border-border bg-popover p-2 text-popover-foreground shadow-xl">
-                <Input
-                  value={mandateQuery}
-                  onChange={(event) => setMandateQuery(event.target.value)}
-                  placeholder="Filter by label or id"
-                  className="mb-2"
-                />
-                <div className="max-h-72 overflow-y-auto">
-                  {mandateOptions.map((mandate) => (
-                    <button
-                      key={mandate.id}
-                      type="button"
-                      onClick={() => {
-                        setMandateId(mandate.id)
-                        setMandateOpen(false)
-                        setMandateQuery("")
-                        router.replace(
-                          `${pathname}?mandateId=${encodeURIComponent(mandate.id)}`
-                        )
-                      }}
-                      className={cn(
-                        "flex w-full items-start gap-2 rounded-md px-2 py-2 text-left hover:bg-accent",
-                        mandateId === mandate.id && "bg-accent"
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "mt-1.5 size-2 shrink-0 rounded-full",
-                          statusDot(mandate.status)
-                        )}
-                      />
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium">
-                          {mandate.label}
-                        </span>
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {shortId(mandate.id)} · {mandate.status}
-                        </span>
-                      </span>
-                    </button>
-                  ))}
-                  {mandateOptions.length === 0 && (
-                    <div className="px-2 py-6 text-center text-sm text-muted-foreground">
-                      No mandates match this filter.
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-          <Select value={kind} onValueChange={(value) => value && setKind(value)}>
+          <MandateFilter
+            mandates={mandates}
+            selectedMandateId={mandateId}
+            loading={loading}
+            onClear={clearMandateFilter}
+            onSelectMandate={(id) => {
+              setMandateId(id);
+              router.replace(`${pathname}?mandateId=${encodeURIComponent(id)}`);
+            }}
+          />
+          <Select
+            value={kind}
+            onValueChange={(value) => value && setKind(value)}
+          >
             <SelectTrigger size="sm" className="w-[170px]">
               <SelectValue />
             </SelectTrigger>
@@ -261,7 +184,9 @@ export function ActivityView() {
           <Empty className="py-12">
             <EmptyHeader>
               <EmptyTitle>
-                {isWalletScoped ? "No on-chain activity yet." : "No events match this filter."}
+                {isWalletScoped
+                  ? "No on-chain activity yet."
+                  : "No events match this filter."}
               </EmptyTitle>
               <EmptyDescription>
                 {isWalletScoped
@@ -273,5 +198,5 @@ export function ActivityView() {
         )}
       </CardContent>
     </Card>
-  )
+  );
 }

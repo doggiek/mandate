@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { AlertCircle, Play, RotateCcw, Square } from "lucide-react";
 import { useCurrentAccount } from "@mysten/dapp-kit";
-
 import {
   Card,
   CardContent,
@@ -18,6 +17,7 @@ import { ActivityFeed } from "@/components/activity-feed";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { CopyableId, shortId } from "@/components/copyable-id";
 import { ExplorerLink } from "@/components/explorer-link";
 import {
@@ -51,6 +51,7 @@ type RuntimeLogLevel =
   | "signal"
   | "waiting"
   | "triggered"
+  | "success"
   | "policy"
   | "blocked"
   | "execute"
@@ -117,6 +118,7 @@ type AutomationSessionState = {
   signalThresholdPct: string;
   executionAmountSui: string;
   executionAsset: "SUI";
+  forceTrigger: boolean;
   running: boolean;
 };
 type AutomationActiveLock = {
@@ -249,7 +251,12 @@ function ResultStatusBadge({ status }: { status: AgentRunResult["status"] }) {
 }
 
 function runtimeLogLevelClass(level: RuntimeLogLevel) {
-  if (level === "triggered" || level === "policy" || level === "filled") {
+  if (
+    level === "triggered" ||
+    level === "policy" ||
+    level === "filled" ||
+    level === "success"
+  ) {
     return "border-emerald-500/25 bg-emerald-500/10 text-emerald-300";
   }
   if (level === "signal" || level === "execute") {
@@ -577,6 +584,87 @@ function formatSignalQuote(signal: SignalStatus | null, value?: number) {
   return formatSignalValue(value);
 }
 
+function orderInputLabel(order: {
+  inputAmount?: number;
+  inputAsset?: string;
+  amountSui?: number;
+}) {
+  if (typeof order.inputAmount === "number") {
+    return `${formatAmount(order.inputAmount)} ${order.inputAsset ?? "SUI"}`;
+  }
+  if (typeof order.amountSui === "number") {
+    return formatSui(order.amountSui);
+  }
+  return "-";
+}
+
+function orderOutputLabel(order: {
+  outputAmount?: string;
+  outputAsset?: string;
+  outputCoinObjectIds?: string[];
+  residualSuiAmount?: number;
+  residualAmount?: number;
+  residualAsset?: string;
+  fillStatus?: "filled" | "no_fill" | "amount_unavailable";
+}) {
+  if (order.fillStatus === "no_fill") {
+    return `No ${order.outputAsset ?? "output"} filled`;
+  }
+  if (order.outputAmount) {
+    return order.outputAmount;
+  }
+  if (order.outputCoinObjectIds?.length) {
+    return "Amount unavailable";
+  }
+  return "Output details unavailable";
+}
+
+function orderResidualLabel(order: {
+  residualSuiAmount?: number;
+  residualAmount?: number;
+  residualAsset?: string;
+}) {
+  if (typeof order.residualSuiAmount === "number") {
+    return `${formatSui(order.residualSuiAmount)} returned`;
+  }
+  if (typeof order.residualAmount === "number" && order.residualAsset) {
+    return `${formatAmount(order.residualAmount)} ${order.residualAsset} returned`;
+  }
+  return "";
+}
+
+function orderStatusLabel(order: {
+  status: string;
+  fillStatus?: "filled" | "no_fill" | "amount_unavailable";
+}) {
+  if (order.status === "failed") {
+    return "Failed";
+  }
+  if (order.fillStatus === "no_fill") {
+    return "No fill";
+  }
+  if (order.fillStatus === "filled") {
+    return "Executed";
+  }
+  return "Amount unavailable";
+}
+
+function orderStatusClass(order: {
+  status: string;
+  fillStatus?: "filled" | "no_fill" | "amount_unavailable";
+}) {
+  if (order.status === "failed") {
+    return "border-destructive/30 bg-destructive/10 text-destructive";
+  }
+  if (order.fillStatus === "no_fill") {
+    return "border-amber-500/25 bg-amber-500/10 text-amber-400";
+  }
+  if (order.fillStatus === "filled") {
+    return "border-emerald-500/25 bg-emerald-500/10 text-emerald-400";
+  }
+  return "border-border bg-background/60 text-muted-foreground";
+}
+
 function formatSignalChange(value?: number) {
   if (typeof value !== "number") {
     return "-";
@@ -604,6 +692,46 @@ function formatRuntimeLogTime(timestampMs: number) {
   });
 }
 
+function outputAmountIsPositive(value?: string) {
+  if (!value) {
+    return false;
+  }
+  const match = value.trim().match(/^(\d+(?:\.\d+)?)/);
+  if (!match) {
+    return true;
+  }
+  return Number(match[1]) > 0;
+}
+
+function resultHasOutput(result: AgentRunResult) {
+  return Boolean(
+    outputAmountIsPositive(result.outputAmount) ||
+    result.outputCoinObjectIds?.length,
+  );
+}
+
+function effectiveFillStatus(result: AgentRunResult) {
+  if (result.status !== "SUCCESS") {
+    return result.fillStatus;
+  }
+  if (outputAmountIsPositive(result.outputAmount)) {
+    return "filled";
+  }
+  if (result.outputAmount && !outputAmountIsPositive(result.outputAmount)) {
+    return "no_fill";
+  }
+  if (result.fillStatus === "filled" && !result.outputAmount) {
+    return "filled";
+  }
+  if (result.fillStatus === "no_fill" && !resultHasOutput(result)) {
+    return "no_fill";
+  }
+  if (result.outputCoinObjectIds?.length) {
+    return "amount_unavailable";
+  }
+  return result.fillStatus;
+}
+
 function runResultLogLevel(result: AgentRunResult): RuntimeLogLevel {
   if (result.status === "BLOCKED") {
     return "blocked";
@@ -611,10 +739,10 @@ function runResultLogLevel(result: AgentRunResult): RuntimeLogLevel {
   if (result.status === "FAILED") {
     return "failed";
   }
-  if (result.fillStatus === "filled") {
-    return "filled";
+  if (effectiveFillStatus(result) === "filled") {
+    return "success";
   }
-  if (result.fillStatus === "no_fill") {
+  if (effectiveFillStatus(result) === "no_fill") {
     return "no_fill";
   }
   return "info";
@@ -631,10 +759,10 @@ function runResultLogMessage(
   if (result.status === "FAILED") {
     return `Failed: ${result.error ?? "Agent execution failed"}`;
   }
-  if (result.fillStatus === "filled") {
-    return `Filled: ${formatRouteAmount(amountSui, spendAsset)} -> ${result.outputAmount ?? result.outputAsset ?? "output"}${result.residualSui ? `, residual ${result.residualSui}` : ""}`;
+  if (effectiveFillStatus(result) === "filled") {
+    return `Executed: DeepBook order executed. ${result.outputAmount ?? result.outputAsset ?? "Output"} received.${result.residualSui ? ` ${result.residualSui} returned.` : ""}`;
   }
-  if (result.fillStatus === "no_fill") {
+  if (effectiveFillStatus(result) === "no_fill") {
     return `No fill: ${formatRouteAmount(amountSui, spendAsset)} returned as residual.`;
   }
   return `Execution completed: ${formatRouteAmount(amountSui, spendAsset)} submitted.`;
@@ -722,12 +850,17 @@ function formatCountdown(nextRunAt: number | null, nowMs: number) {
   return `in ${seconds}s`;
 }
 
-export function AgentExecutionPanel() {
+export function AgentExecutionPanel({
+  onSelectMandate,
+}: {
+  onSelectMandate?: (id: string) => void;
+}) {
   const account = useCurrentAccount();
   const searchParams = useSearchParams();
   const {
     mandates,
     activity,
+    orders,
     loading,
     isWalletScoped,
     refreshMandates,
@@ -752,8 +885,11 @@ export function AgentExecutionPanel() {
   const [signalThresholdPct, setSignalThresholdPct] = React.useState(() =>
     String(defaultSignalStrategy().thresholdPct),
   );
-  const [executionAmountSui, setExecutionAmountSui] = React.useState("0.001");
+  const [executionAmountSui, setExecutionAmountSui] = React.useState(() =>
+    String(defaultSignalStrategy().executionAmountSui || 1),
+  );
   const [executionAsset, setExecutionAsset] = React.useState<"SUI">("SUI");
+  const [forceTrigger, setForceTrigger] = React.useState(false);
   const [autoStatus, setAutoStatus] = React.useState<AutoRunStatus>("off");
   const [autoMessage, setAutoMessage] = React.useState<string | null>(null);
   const [autoRunCount, setAutoRunCount] = React.useState(0);
@@ -768,6 +904,7 @@ export function AgentExecutionPanel() {
   const autoTimerRef = React.useRef<number | null>(null);
   const autoInFlightRef = React.useRef(false);
   const loadedScopeRef = React.useRef<string | null>(null);
+  const initializedMandateScopeRef = React.useRef<string | null>(null);
   const skipNextPersistRef = React.useRef(false);
   const loggedPageLoadedRef = React.useRef(false);
   const [mandateQueryReady, setMandateQueryReady] = React.useState(false);
@@ -872,6 +1009,7 @@ export function AgentExecutionPanel() {
 
   React.useEffect(() => {
     mandateLoadingSeenRef.current = false;
+    initializedMandateScopeRef.current = null;
     setMandateQueryReady(false);
   }, [ownerPackageScope]);
 
@@ -888,52 +1026,50 @@ export function AgentExecutionPanel() {
       return;
     }
 
-    if (mandateLoadingSeenRef.current || currentPackageMandates.length > 0) {
+    if (mandateLoadingSeenRef.current) {
       setMandateQueryReady(true);
     }
-  }, [
-    currentPackageMandates.length,
-    isWalletScoped,
-    loading,
-    ownerPackageScope,
-  ]);
+  }, [isWalletScoped, loading, ownerPackageScope]);
 
   React.useEffect(() => {
-    if (loading || selectableMandates.length === 0) {
+    if (!mandateQueryReady) {
+      return;
+    }
+
+    if (selectableMandates.length === 0) {
+      initializedMandateScopeRef.current = ownerPackageScope;
       return;
     }
 
     const latestActive = currentPackageActiveMandates[0];
+    const latestMandate = currentPackageMandates[0];
     const stillPresent = selectableMandates.some(
       (mandate) => mandate.id === selectedMandateId,
     );
     const currentSelection = selectableMandates.find(
       (mandate) => mandate.id === selectedMandateId,
     );
-    const savedSelectedMandateId = ownerPackageScope
-      ? readJsonStorage<string>(
-          scopedStorageKey(
-            AUTOMATION_SELECTED_MANDATE_PREFIX,
-            ownerPackageScope,
-          ),
-        )
-      : null;
-    const savedSelection = currentPackageMandates.find(
-      (mandate) => mandate.id === savedSelectedMandateId,
-    );
     const urlSelection = currentPackageMandates.find(
       (mandate) => mandate.id === urlMandateId,
     );
+    const scopeInitialized =
+      initializedMandateScopeRef.current === ownerPackageScope;
+
+    if (!scopeInitialized) {
+      initializedMandateScopeRef.current = ownerPackageScope;
+      setSelectedMandateId(
+        urlSelection?.id ?? latestActive?.id ?? latestMandate?.id ?? null,
+      );
+      return;
+    }
 
     if (!stillPresent || !belongsToCurrentPackage(currentSelection)) {
-      setSelectedMandateId(
-        urlSelection?.id ?? savedSelection?.id ?? latestActive?.id ?? null,
-      );
+      setSelectedMandateId(latestActive?.id ?? latestMandate?.id ?? null);
     }
   }, [
     currentPackageMandates,
     currentPackageActiveMandates,
-    loading,
+    mandateQueryReady,
     ownerPackageScope,
     selectableMandates,
     selectedMandateId,
@@ -964,8 +1100,72 @@ export function AgentExecutionPanel() {
 
     return sortActivitiesByTimeDesc(
       activity.filter((event) => event.mandateId === selectedMandate.id),
-    ).slice(0, 3);
+    ).slice(0, 5);
   }, [activity, selectedMandate?.id]);
+  const latestMandateOrder = React.useMemo(() => {
+    if (!selectedMandate?.id) {
+      return null;
+    }
+
+    return (
+      orders
+        .filter((order) => order.mandateId === selectedMandate.id)
+        .sort((a, b) => b.timestamp - a.timestamp)[0] ?? null
+    );
+  }, [orders, selectedMandate?.id]);
+
+  React.useEffect(() => {
+    if (!selectedMandate?.id || orders.length === 0) {
+      return;
+    }
+
+    const ordersByDigest = new Map(
+      orders
+        .filter((order) => order.mandateId === selectedMandate.id)
+        .map((order) => [order.digest, order]),
+    );
+
+    setRuntimeLog((entries) =>
+      entries.map((entry) => {
+        if (!entry.digest) {
+          return entry;
+        }
+
+        const order = ordersByDigest.get(entry.digest);
+        if (!order) {
+          return entry;
+        }
+
+        const residual = orderResidualLabel(order);
+        const nextLevel =
+          order.status === "failed"
+            ? "failed"
+            : order.fillStatus === "filled"
+              ? "success"
+              : order.fillStatus === "no_fill"
+                ? "no_fill"
+                : entry.level;
+        const nextMessage =
+          order.status === "failed"
+            ? "Failed: Transaction failed"
+            : order.fillStatus === "filled"
+              ? `Executed: DeepBook order executed. ${orderOutputLabel(order)} received.${residual ? ` ${residual}.` : ""}`
+              : order.fillStatus === "no_fill"
+                ? `No fill: ${residual || "input returned as residual."}`
+                : entry.message;
+
+        if (entry.level === nextLevel && entry.message === nextMessage) {
+          return entry;
+        }
+
+        return {
+          ...entry,
+          level: nextLevel,
+          message: nextMessage,
+        };
+      }),
+    );
+  }, [orders, selectedMandate?.id]);
   const automationScope = React.useMemo(() => {
     const ownerAddress = account?.address;
     if (!ownerAddress || !PACKAGE_ID || !selectedMandate?.id) {
@@ -999,30 +1199,25 @@ export function AgentExecutionPanel() {
   const mandateSummary = React.useMemo(
     () => [
       {
-        label: "Agent Wallet",
-        value: selectedMandate?.agentAddress,
-        copyable: Boolean(selectedMandate?.agentAddress),
-      },
-      {
         label: "Mandate ID",
         value: selectedMandate?.id,
         copyable: Boolean(selectedMandate?.id),
       },
       {
+        label: "Status",
+        value: selectedMandate?.status ?? "-",
+        copyable: false,
+      },
+      {
         label: "Budget",
         value: selectedMandate
-          ? `${formatRouteAmount(selectedMandate.spent, selectedMandate.assetSymbol)} / ${formatRouteAmount(selectedMandate.budget, selectedMandate.assetSymbol)}`
+          ? `${formatSui(selectedMandate.spent)} / ${formatSui(selectedMandate.budget)}`
           : "-",
         copyable: false,
       },
       {
         label: "Max tx",
-        value: selectedMandate
-          ? formatRouteAmount(
-              selectedMandate.txLimit,
-              selectedMandate.assetSymbol,
-            )
-          : "-",
+        value: selectedMandate ? formatSui(selectedMandate.txLimit) : "-",
         copyable: false,
       },
       {
@@ -1034,15 +1229,10 @@ export function AgentExecutionPanel() {
         label: "Spend asset",
         value:
           selectedTradingRoute?.action.spendAsset === "SUI"
-            ? "SUI vault"
+            ? "SUI"
             : selectedTradingRoute?.action.spendAsset
-              ? `${selectedTradingRoute.action.spendAsset} vault`
+              ? displayAsset(selectedTradingRoute.action.spendAsset)
               : "-",
-        copyable: false,
-      },
-      {
-        label: "Status",
-        value: selectedMandate?.status ?? "-",
         copyable: false,
       },
     ],
@@ -1198,11 +1388,14 @@ export function AgentExecutionPanel() {
     mandateQueryReady &&
     !selectedMandate &&
     currentPackageMandates.length === 0;
+  const mandateSelectOptions = mandateQueryReady ? selectableMandates : [];
   const mandateSelectLabel = selectedMandate
     ? `${selectedMandate.label} (${shortId(selectedMandate.id)})`
-    : selectedMandateId
-      ? `Loading mandate (${shortId(selectedMandateId)})`
-      : "Select mandate";
+    : !mandateQueryReady
+      ? "Loading mandates..."
+      : selectedMandateId
+        ? `Loading mandate (${shortId(selectedMandateId)})`
+        : "Select mandate";
   const compactRunStatus = React.useMemo(() => {
     if (isRunning) {
       return "Executing";
@@ -1214,10 +1407,10 @@ export function AgentExecutionPanel() {
       return "Policy blocked";
     }
     if (result?.status === "SUCCESS") {
-      if (result.fillStatus === "filled") {
-        return "Filled";
+      if (effectiveFillStatus(result) === "filled") {
+        return "Executed";
       }
-      if (result.fillStatus === "no_fill") {
+      if (effectiveFillStatus(result) === "no_fill") {
         return "No fill";
       }
       return "Signal triggered";
@@ -1290,8 +1483,12 @@ export function AgentExecutionPanel() {
     setSignalStrategyId(savedSession.signalStrategyId);
     setSignalDirection(savedSession.signalDirection);
     setSignalThresholdPct(savedSession.signalThresholdPct);
-    setExecutionAmountSui(savedSession.executionAmountSui ?? "0.001");
+    setExecutionAmountSui(
+      savedSession.executionAmountSui ??
+        String(defaultSignalStrategy().executionAmountSui || 1),
+    );
     setExecutionAsset(savedSession.executionAsset ?? "SUI");
+    setForceTrigger(Boolean(savedSession.forceTrigger));
 
     if (savedSession.running) {
       releaseActiveAutomationLockForScope(automationScope);
@@ -1330,6 +1527,7 @@ export function AgentExecutionPanel() {
         signalThresholdPct,
         executionAmountSui,
         executionAsset,
+        forceTrigger,
         running: autoStatus === "running",
       },
     );
@@ -1339,6 +1537,7 @@ export function AgentExecutionPanel() {
     automationScope,
     executionAmountSui,
     executionAsset,
+    forceTrigger,
     selectedMandate?.id,
     signalDirection,
     signalStrategyId,
@@ -1433,7 +1632,7 @@ export function AgentExecutionPanel() {
       setSignalStrategyId(nextStrategy.id);
       setSignalDirection(nextStrategy.direction);
       setSignalThresholdPct(String(nextStrategy.thresholdPct));
-      setExecutionAmountSui(String(nextStrategy.executionAmountSui || 0.001));
+      setExecutionAmountSui(String(nextStrategy.executionAmountSui || 1));
       clearRunResult();
       appendRuntimeLog(
         "info",
@@ -1615,6 +1814,7 @@ export function AgentExecutionPanel() {
           };
         }
 
+        const normalizedFillStatus = effectiveFillStatus(payload);
         appendRuntimeLog(
           runResultLogLevel(payload),
           runResultLogMessage(
@@ -1656,7 +1856,7 @@ export function AgentExecutionPanel() {
               : undefined,
           outputCoinObjectIds: payload.outputCoinObjectIds,
           outputOwner: payload.outputOwner,
-          fillStatus: payload.fillStatus,
+          fillStatus: normalizedFillStatus,
         });
         scheduleRefresh();
         return {
@@ -1708,16 +1908,13 @@ export function AgentExecutionPanel() {
     ],
   );
 
-  const runAgent = React.useCallback(() => {
-    appendRuntimeLog("info", "Test Agent clicked.");
-    void executeAgentRun(policyStrategy);
-  }, [appendRuntimeLog, executeAgentRun, policyStrategy]);
-
   const checkSignal = React.useCallback(
     async (force?: "triggered") => {
       appendRuntimeLog(
         "signal",
-        `Checking ${selectedSignalStrategy.market} via ${selectedSignalStrategy.source}.`,
+        force
+          ? `Checking ${selectedSignalStrategy.market} via ${selectedSignalStrategy.source}; force trigger enabled.`
+          : `Checking ${selectedSignalStrategy.market} via ${selectedSignalStrategy.source}.`,
       );
       const params = new URLSearchParams({
         strategyId: selectedSignalStrategy.id,
@@ -1738,7 +1935,9 @@ export function AgentExecutionPanel() {
       appendRuntimeLog(
         signal.decision === "triggered" ? "triggered" : "waiting",
         signal.decision === "triggered"
-          ? `${signalSourceLabel(signal)} moved ${formatSignalChange(signal.changePct)}, threshold ${signal.thresholdPct}% reached.`
+          ? force
+            ? `Force trigger enabled: ${signalSourceLabel(signal)} checked at ${currentQuote}. Signal threshold bypassed.`
+            : `${signalSourceLabel(signal)} moved ${formatSignalChange(signal.changePct)}, threshold ${signal.thresholdPct}% reached.`
           : `${signalSourceLabel(signal)} checked: ${currentQuote}. Change ${formatSignalChange(signal.changePct)} is below threshold ${signal.thresholdPct}%. Next check ${selectedAutoIntervalLabel === "Off" ? "-" : selectedAutoIntervalLabel}.`,
       );
       return signal;
@@ -1754,6 +1953,39 @@ export function AgentExecutionPanel() {
       thresholdPct,
     ],
   );
+
+  const runAgent = React.useCallback(() => {
+    appendRuntimeLog("info", "Test Agent clicked.");
+    void (async () => {
+      let signal: SignalStatus;
+      try {
+        signal = await checkSignal(forceTrigger ? "triggered" : undefined);
+      } catch (caught) {
+        appendRuntimeLog(
+          "failed",
+          caught instanceof Error ? caught.message : "Signal check failed.",
+        );
+        return;
+      }
+
+      if (signal.decision !== "triggered") {
+        setAutoMessage("Waiting for signal");
+        appendRuntimeLog(
+          "waiting",
+          "Test Agent skipped: signal is below threshold. Enable Force trigger to bypass the threshold only.",
+        );
+        return;
+      }
+
+      void executeAgentRun(policyStrategy);
+    })();
+  }, [
+    appendRuntimeLog,
+    checkSignal,
+    executeAgentRun,
+    forceTrigger,
+    policyStrategy,
+  ]);
 
   const runAutoOnce = React.useCallback(async () => {
     if (autoInFlightRef.current) {
@@ -1779,7 +2011,7 @@ export function AgentExecutionPanel() {
     autoInFlightRef.current = true;
     let signal: SignalStatus;
     try {
-      signal = await checkSignal();
+      signal = await checkSignal(forceTrigger ? "triggered" : undefined);
       setAutoCheckCount((count) => count + 1);
     } catch (caught) {
       autoInFlightRef.current = false;
@@ -1830,6 +2062,7 @@ export function AgentExecutionPanel() {
     appendRuntimeLog,
     checkSignal,
     executeAgentRun,
+    forceTrigger,
     policyStrategy,
     stopAutoRun,
     validateRunStrategy,
@@ -1910,10 +2143,11 @@ export function AgentExecutionPanel() {
       source: selectedSignalStrategy.source,
       market: selectedSignalStrategy.market,
       threshold: thresholdPct,
+      forceTrigger,
     });
     appendRuntimeLog(
       "info",
-      `Start Automation clicked: monitoring ${selectedSignalStrategy.market} via ${selectedSignalStrategy.source}.`,
+      `Start Automation clicked: monitoring ${selectedSignalStrategy.market} via ${selectedSignalStrategy.source}${forceTrigger ? " with force trigger" : ""}.`,
     );
     setAutoStatus("running");
     setAutoMessage(null);
@@ -1965,6 +2199,7 @@ export function AgentExecutionPanel() {
     appendRuntimeLog,
     actionAmountSui,
     executeAgentRun,
+    forceTrigger,
     policyStrategy,
     remainingBudget,
     runAutoOnce,
@@ -2044,85 +2279,95 @@ export function AgentExecutionPanel() {
   return (
     <Card className="border-primary/15 bg-card/80">
       <CardHeader className="border-b border-border">
-        <CardTitle>Automation</CardTitle>
+        <CardTitle>Autonomous Execution</CardTitle>
         <CardDescription>
-          Signal → Policy Gate → DeepBook Buy → On-chain Proof.
+          Owner signs only to create or revoke a Mandate. The backend Trading
+          Agent executes within these on-chain limits.
         </CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-col gap-4 p-4">
-        <section className="flex flex-col gap-3">
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">
-              Mandate Policy
-            </h3>
-            <p className="text-xs text-muted-foreground">
-              Owner signs only to create or revoke a Mandate. The backend
-              Trading Agent executes within these on-chain limits.
-            </p>
-          </div>
+      <CardContent className="flex flex-col gap-3 p-4 pt-2">
+        <section className="flex flex-col gap-2">
           <div className="rounded-lg border border-border bg-background/60 p-3">
-            {selectableMandates.length > 0 ? (
-              <Select
-                value={selectedMandateId ?? ""}
-                onValueChange={handleMandateChange}
-              >
-                <SelectTrigger className="h-auto w-full border-primary/20 bg-primary/5 py-2">
-                  <span className="min-w-0 truncate text-left text-sm font-medium">
-                    {mandateSelectLabel}
-                  </span>
-                </SelectTrigger>
-                <SelectContent
-                  align="start"
-                  className="w-[min(560px,calc(100vw-2rem))]"
+            <div className="mb-2 text-xs font-bold text-muted-foreground">
+              Select Mandate
+            </div>
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+              {mandateSelectOptions.length > 0 ? (
+                <Select
+                  value={selectedMandateId ?? ""}
+                  onValueChange={handleMandateChange}
                 >
-                  <SelectGroup>
-                    {selectableMandates.map((mandate) => (
-                      <SelectItem
-                        key={mandate.id}
-                        value={mandate.id}
-                        className="py-2"
-                      >
-                        <span className="flex min-w-0 items-start gap-2">
-                          <span
-                            className={cn(
-                              "mt-1.5 size-2 shrink-0 rounded-full",
-                              mandateStatusDot(mandate.status),
-                            )}
-                          />
-                          <span className="flex min-w-0 flex-col gap-1">
-                            <span className="truncate font-medium">
-                              {mandate.label}
-                            </span>
-                            <span className="truncate text-xs text-muted-foreground">
-                              <span className="font-mono">
-                                {shortId(mandate.id)}
+                  <SelectTrigger className="!h-10 w-full border-primary/20 bg-primary/5 data-[size=default]:!h-10">
+                    <span className="min-w-0 truncate text-left text-sm font-medium">
+                      {mandateSelectLabel}
+                    </span>
+                  </SelectTrigger>
+                  <SelectContent
+                    align="start"
+                    className="w-[min(560px,calc(100vw-2rem))]"
+                  >
+                    <SelectGroup>
+                      {mandateSelectOptions.map((mandate) => (
+                        <SelectItem
+                          key={mandate.id}
+                          value={mandate.id}
+                          className="py-2"
+                        >
+                          <span className="flex min-w-0 items-start gap-2">
+                            <span
+                              className={cn(
+                                "mt-1.5 size-2 shrink-0 rounded-full",
+                                mandateStatusDot(mandate.status),
+                              )}
+                            />
+                            <span className="flex min-w-0 flex-col gap-1">
+                              <span className="truncate font-medium">
+                                {mandate.label}
                               </span>
-                              {" · "}
-                              <span className="capitalize">
-                                {mandate.status}
+                              <span className="truncate text-xs text-muted-foreground">
+                                <span className="font-mono">
+                                  {shortId(mandate.id)}
+                                </span>
+                                {" · "}
+                                <span className="capitalize">
+                                  {mandate.status}
+                                </span>
+                                {!belongsToCurrentPackage(mandate) &&
+                                  " · old package"}
+                                {" · "}Budget {formatSui(mandate.budget)}
+                                {" · "}Max {formatSui(mandate.txLimit)}
+                                {" · "}Created {mandate.createdAtDisplay ?? "-"}
+                                {" · "}Expires {mandateExpiryLabel(mandate)}
                               </span>
-                              {!belongsToCurrentPackage(mandate) &&
-                                " · old package"}
-                              {" · "}Budget {formatSui(mandate.budget)}
-                              {" · "}Max {formatSui(mandate.txLimit)}
-                              {" · "}Created {mandate.createdAtDisplay ?? "-"}
-                              {" · "}Expires {mandateExpiryLabel(mandate)}
                             </span>
                           </span>
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            ) : (
-              <div className="flex min-h-9 w-full items-center rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm font-medium text-muted-foreground">
-                {mandateSelectLabel}
-              </div>
-            )}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              ) : (
+                <div className="flex h-10 w-full items-center rounded-md border border-primary/20 bg-primary/5 px-3 text-sm font-medium text-muted-foreground">
+                  {mandateSelectLabel}
+                </div>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                disabled={!selectedMandate || showMandateLoadingState}
+                onClick={() => {
+                  if (selectedMandate) {
+                    onSelectMandate?.(selectedMandate.id);
+                  }
+                }}
+                className="!h-10 w-full shrink-0 sm:w-[120px]"
+              >
+                Detail →
+              </Button>
+            </div>
           </div>
 
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             {mandateSummary.map((item) => (
               <SummaryChip
                 key={item.label}
@@ -2137,9 +2382,7 @@ export function AgentExecutionPanel() {
                     (item.value ?? "-")
                   )
                 }
-                mono={
-                  item.label === "Agent Wallet" || item.label === "Mandate ID"
-                }
+                mono={item.label === "Mandate ID"}
                 title={typeof item.value === "string" ? item.value : undefined}
               />
             ))}
@@ -2293,7 +2536,7 @@ export function AgentExecutionPanel() {
 
           <div className="grid gap-4 lg:grid-cols-3">
             <div className="min-w-0 rounded-lg border border-border/60 bg-background/35 p-3">
-              <div className="text-xs font-medium text-muted-foreground">
+              <div className="text-xs font-bold text-muted-foreground">
                 Trigger
               </div>
               <div className="mt-3 space-y-2">
@@ -2351,6 +2594,28 @@ export function AgentExecutionPanel() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="grid grid-cols-[104px_minmax(0,1fr)] items-start gap-3 py-1.5">
+                  <span className="truncate text-xs text-muted-foreground">
+                    Force execution
+                  </span>
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        size="sm"
+                        checked={forceTrigger}
+                        disabled={autoStatus === "running"}
+                        onCheckedChange={setForceTrigger}
+                        aria-label="Force trigger"
+                      />
+                      <span className="text-sm text-foreground">
+                        {forceTrigger ? "On" : "Off"}
+                      </span>
+                    </div>
+                    <p className="text-xs leading-snug text-muted-foreground">
+                      Bypass signal checks. Liquidity still applies.
+                    </p>
+                  </div>
+                </div>
                 <RunSetupField
                   label="Signal market"
                   value={
@@ -2363,7 +2628,7 @@ export function AgentExecutionPanel() {
             </div>
 
             <div className="min-w-0 rounded-lg border border-border/60 bg-background/35 p-3">
-              <div className="text-xs font-medium text-muted-foreground">
+              <div className="text-xs font-bold text-muted-foreground">
                 Action
               </div>
               <div className="mt-3 space-y-2">
@@ -2405,7 +2670,7 @@ export function AgentExecutionPanel() {
             </div>
 
             <div className="min-w-0 rounded-lg border border-border/60 bg-background/35 p-3">
-              <div className="text-xs font-medium text-muted-foreground">
+              <div className="text-xs font-bold text-muted-foreground">
                 Policy Preview
               </div>
               <div className="mt-3 space-y-1">
@@ -2546,11 +2811,11 @@ export function AgentExecutionPanel() {
         <section className="flex flex-col gap-3 rounded-lg border border-border bg-background/45 p-3">
           <div>
             <h3 className="text-sm font-semibold text-foreground">
-              Agent Console
+              Execution Log
             </h3>
             <p className="text-xs text-muted-foreground">
-              Local session trace for Signal → Policy Gate → DeepBook Buy →
-              On-chain Proof.
+              Signal checks, policy decisions, execution results, and on-chain
+              proof events.
             </p>
           </div>
 
@@ -2594,39 +2859,127 @@ export function AgentExecutionPanel() {
         </section>
 
         <section className="flex flex-col gap-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-semibold text-foreground">
-                Recent Activity
-              </h3>
-              <p className="text-xs text-muted-foreground">
-                Latest events for the selected Mandate.
-              </p>
+          <div className="pb-2 pt-3 pl-2">
+            <h3 className="text-sm font-semibold text-foreground">
+              On-chain Proof
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Activity and DeepBook order records for the selected Mandate.
+            </p>
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.9fr)]">
+            <div className="min-w-0 rounded-lg border border-border bg-background/45">
+              <div className="flex items-start justify-between gap-3 border-b border-border px-3 py-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-foreground">
+                    Recent Activity
+                  </h4>
+                  <p className="text-xs text-muted-foreground">
+                    Latest on-chain events for this mandate.
+                  </p>
+                </div>
+                {selectedMandate?.id && (
+                  <Link
+                    href={`/console/activity?mandateId=${encodeURIComponent(
+                      selectedMandate.id,
+                    )}`}
+                    className="shrink-0 rounded-md px-2 py-1 text-sm text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                  >
+                    View all →
+                  </Link>
+                )}
+              </div>
+
+              {selectedMandateActivity.length > 0 ? (
+                <div className="px-3">
+                  <ActivityFeed events={selectedMandateActivity} />
+                </div>
+              ) : (
+                <div className="p-4 text-sm text-muted-foreground">
+                  No activity for this mandate yet.
+                </div>
+              )}
             </div>
-            <div className="flex items-center gap-2">
-              {result && <ResultStatusBadge status={result.status} />}
-              {selectedMandate?.id && (
+
+            <div className="min-w-0 rounded-lg border border-border bg-background/45">
+              <div className="flex items-start justify-between gap-3 border-b border-border px-3 py-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-foreground">
+                    Latest DeepBook Order
+                  </h4>
+                  <p className="text-xs text-muted-foreground">
+                    Last DeepBook order executed under this mandate.
+                  </p>
+                </div>
                 <Link
-                  href={`/console/activity?mandateId=${encodeURIComponent(
-                    selectedMandate.id,
-                  )}`}
-                  className="rounded-md px-2 py-1 text-sm text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                  href="/console/orders"
+                  className="shrink-0 rounded-md px-2 py-1 text-sm text-muted-foreground transition hover:bg-accent hover:text-foreground"
                 >
                   View all →
                 </Link>
+              </div>
+
+              {latestMandateOrder ? (
+                <div className="space-y-3 p-3">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <SummaryChip
+                      label="Market"
+                      value={latestMandateOrder.pair ?? DEEPBOOK_POOL_KEY}
+                    />
+                    <SummaryChip
+                      label="Status"
+                      value={
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "w-fit",
+                            orderStatusClass(latestMandateOrder),
+                          )}
+                        >
+                          {orderStatusLabel(latestMandateOrder)}
+                        </Badge>
+                      }
+                    />
+                    <SummaryChip
+                      label="Input"
+                      value={orderInputLabel(latestMandateOrder)}
+                      mono
+                    />
+                    <SummaryChip
+                      label="Output"
+                      value={orderOutputLabel(latestMandateOrder)}
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 bg-background/50 px-3 py-2 text-xs text-muted-foreground">
+                    <span className="min-w-0 truncate">
+                      {latestMandateOrder.fillStatus === "filled"
+                        ? "Swap filled"
+                        : latestMandateOrder.fillStatus === "no_fill"
+                          ? "Input returned as residual"
+                          : latestMandateOrder.status === "failed"
+                            ? "Transaction failed"
+                            : "Output details unavailable"}
+                      {orderResidualLabel(latestMandateOrder)
+                        ? ` · ${orderResidualLabel(latestMandateOrder)}`
+                        : ""}
+                    </span>
+                    <span className="inline-flex shrink-0 items-center gap-1">
+                      <CopyableId
+                        value={latestMandateOrder.digest}
+                        label="DeepBook order digest"
+                      />
+                      <ExplorerLink digest={latestMandateOrder.digest} />
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 text-sm text-muted-foreground">
+                  No DeepBook orders linked yet.
+                </div>
               )}
             </div>
           </div>
-
-          {selectedMandateActivity.length > 0 ? (
-            <div className="rounded-lg border border-border bg-background/45 px-3">
-              <ActivityFeed events={selectedMandateActivity} />
-            </div>
-          ) : (
-            <div className="rounded-lg border border-dashed border-border bg-background/50 p-4 text-sm text-muted-foreground">
-              No activity for this mandate yet.
-            </div>
-          )}
         </section>
       </CardContent>
     </Card>

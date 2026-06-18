@@ -1,12 +1,13 @@
-import { SiteHeader } from '@/components/site-header'
-import { Hero } from '@/components/hero'
-import { Problem } from '@/components/problem'
-import { UseCase } from '@/components/use-case'
-import { HowItWorks } from '@/components/how-it-works'
-import { Architecture } from '@/components/architecture'
-import { ActivityLog } from '@/components/activity-log'
-import { SecurityControls } from '@/components/security-controls'
-import { CtaSection, SiteFooter } from '@/components/cta-section'
+import { SiteHeader } from "@/components/site-header";
+import { Hero } from "@/components/hero";
+import { Problem } from "@/components/problem";
+import { WhyMandate } from "@/components/why-mandate";
+import { ProductDemo } from "@/components/product-demo";
+import { HowItWorks } from "@/components/how-it-works";
+import { Architecture } from "@/components/architecture";
+import { ActivityLog } from "@/components/activity-log";
+import { SecurityControls } from "@/components/security-controls";
+import { CtaSection, SiteFooter } from "@/components/cta-section";
 
 export default function Page() {
   return (
@@ -14,9 +15,10 @@ export default function Page() {
       <SiteHeader />
       <main>
         <Hero />
+        <WhyMandate />
         <Problem />
-        <UseCase />
         <HowItWorks />
+        <ProductDemo />
         <Architecture />
         <ActivityLog />
         <SecurityControls />
@@ -24,5 +26,5 @@ export default function Page() {
       </main>
       <SiteFooter />
     </div>
-  )
+  );
 }

@@ -1,22 +1,22 @@
-import { Play } from 'lucide-react'
-import { SectionLabel } from '@/components/section-label'
+import { Play } from "lucide-react";
+import { SectionLabel } from "@/components/section-label";
 
-export function UseCase() {
+export function WhyMandate() {
   return (
     <section
-      id="use-case"
+      id="why-mandate"
       className="relative border-t border-border py-20 sm:py-28"
     >
       <div className="mx-auto max-w-6xl px-4 sm:px-6">
         <div className="mx-auto max-w-3xl text-center">
-          <SectionLabel>Use case</SectionLabel>
+          <SectionLabel>Why I Built it</SectionLabel>
           <h2 className="mt-5 text-balance text-3xl font-medium tracking-tight sm:text-4xl">
             Policy-controlled DCA Mandate
           </h2>
           <p className="mt-4 text-pretty text-lg leading-relaxed text-muted-foreground">
             Move part of your income into a capped Mandate Vault. The agent can
-            watch real on-chain signals and accumulate only when policy allows
-            — no repeated signatures, no unlimited wallet access, and every
+            watch real on-chain signals and accumulate only when policy allows —
+            no repeated signatures, no unlimited wallet access, and every
             attempt leaves on-chain proof.
           </p>
         </div>
@@ -33,7 +33,7 @@ export function UseCase() {
                 <span className="size-2 rounded-full bg-primary/70" />
               </div>
               <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
-                Product Video
+                Founder Story
               </span>
             </div>
 
@@ -42,7 +42,7 @@ export function UseCase() {
                 <button
                   type="button"
                   className="flex size-16 items-center justify-center rounded-full border border-primary/35 bg-primary/15 text-primary shadow-2xl shadow-primary/20 transition-transform group-hover:scale-105"
-                  aria-label="Play product video"
+                  aria-label="Play Founder Story"
                 >
                   <Play className="ml-0.5 size-7 fill-current" />
                 </button>
@@ -61,5 +61,5 @@ export function UseCase() {
         </div>
       </div>
     </section>
-  )
+  );
 }

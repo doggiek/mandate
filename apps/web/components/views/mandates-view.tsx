@@ -1,23 +1,29 @@
-"use client"
+"use client";
 
-import * as React from "react"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Button } from "@/components/ui/button"
-import { MandateTable } from "@/components/mandate-table"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { Skeleton } from "@/components/ui/skeleton"
-import { useMandateStore } from "@/lib/mandate-store"
-import type { MandateStatus } from "@/lib/mandate-data"
-import { Plus, ShieldOff } from "lucide-react"
+import * as React from "react";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { MandateTable } from "@/components/mandate-table";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useMandateStore } from "@/lib/mandate-store";
+import type { MandateStatus } from "@/lib/mandate-data";
+import { Plus, ShieldOff } from "lucide-react";
 
-type Filter = "all" | MandateStatus
+type Filter = "all" | MandateStatus;
 
 const FILTERS: { value: Filter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "active", label: "Active" },
   { value: "expired", label: "Expired" },
   { value: "revoked", label: "Revoked" },
-]
+];
 
 function MandatesTableSkeleton() {
   return (
@@ -38,7 +44,7 @@ function MandatesTableSkeleton() {
         </div>
       ))}
     </div>
-  )
+  );
 }
 
 export function MandatesView({
@@ -46,17 +52,15 @@ export function MandatesView({
   onCreate,
   onRevokeMandate,
 }: {
-  onSelectMandate: (id: string) => void
-  onCreate: () => void
-  onRevokeMandate: (id: string) => void
+  onSelectMandate: (id: string) => void;
+  onCreate: () => void;
+  onRevokeMandate: (id: string) => void;
 }) {
-  const { mandates, loading, error, isWalletScoped } = useMandateStore()
-  const [filter, setFilter] = React.useState<Filter>("all")
+  const { mandates, loading, error, isWalletScoped } = useMandateStore();
+  const [filter, setFilter] = React.useState<Filter>("all");
 
   const filtered =
-    filter === "all"
-      ? mandates
-      : mandates.filter((m) => m.status === filter)
+    filter === "all" ? mandates : mandates.filter((m) => m.status === filter);
 
   return (
     <div className="flex flex-col gap-4">
@@ -70,7 +74,7 @@ export function MandatesView({
             ))}
           </TabsList>
         </Tabs>
-        <Button size="sm" onClick={onCreate}>
+        <Button variant="outline" size="sm" onClick={onCreate}>
           <Plus data-icon="inline-start" />
           Create Mandate
         </Button>
@@ -118,5 +122,5 @@ export function MandatesView({
         </Empty>
       )}
     </div>
-  )
+  );
 }

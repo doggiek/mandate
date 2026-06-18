@@ -59,6 +59,7 @@ import {
   PUBLIC_BACKEND_AGENT_ADDRESS,
   BACKEND_AGENT_ADDRESS,
   BACKEND_AGENT_ADDRESS_SOURCE,
+  getActiveDeepBookRouteConfig,
 } from "@/lib/chain-config";
 import { Loader2 } from "lucide-react";
 
@@ -76,6 +77,22 @@ const EXPIRATION_OPTIONS = [
 
 type CreateStatus = "idle" | "signing" | "success" | "error";
 type SpendAsset = "SUI" | "DUSDC";
+const DEFAULT_BUDGET = "3";
+const DEFAULT_MAX_TX = (() => {
+  const executionAmount = getActiveDeepBookRouteConfig().executionAmount;
+  return executionAmount > 0
+    ? String(Math.max(executionAmount + 0.1, 1.1))
+    : "1.1";
+})();
+
+function defaultMandateLabel() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  const hour = String(now.getHours()).padStart(2, "0");
+  const minute = String(now.getMinutes()).padStart(2, "0");
+  return `Trading Mandate-${month}${day}-${hour}${minute}`;
+}
 
 function parseDecimalToUnits(value: string, decimals: number, label: string) {
   const trimmed = value.trim();
@@ -170,12 +187,13 @@ export function CreateMandateDialog({
   const closeTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const wasOpenRef = React.useRef(false);
 
   const [label, setLabel] = React.useState("");
   const [agentAddress, setAgentAddress] = React.useState(BACKEND_AGENT_ADDRESS);
   const [spendAsset, setSpendAsset] = React.useState<SpendAsset>("SUI");
-  const [budgetSui, setBudgetSui] = React.useState("0.1");
-  const [txLimitSui, setTxLimitSui] = React.useState("0.01");
+  const [budgetSui, setBudgetSui] = React.useState(DEFAULT_BUDGET);
+  const [txLimitSui, setTxLimitSui] = React.useState(DEFAULT_MAX_TX);
   const [ttlMs, setTtlMs] = React.useState(EXPIRATION_OPTIONS[2].value);
   const [isSigning, setSigning] = React.useState(false);
   const [status, setStatus] = React.useState<CreateStatus>("idle");
@@ -249,11 +267,11 @@ export function CreateMandateDialog({
   }, [open]);
 
   function reset() {
-    setLabel("");
+    setLabel(defaultMandateLabel());
     setAgentAddress(BACKEND_AGENT_ADDRESS);
     setSpendAsset("SUI");
-    setBudgetSui("0.1");
-    setTxLimitSui("0.01");
+    setBudgetSui(DEFAULT_BUDGET);
+    setTxLimitSui(DEFAULT_MAX_TX);
     setTtlMs(EXPIRATION_OPTIONS[2].value);
     setSigning(false);
     setStatus("idle");
@@ -266,6 +284,10 @@ export function CreateMandateDialog({
   function handleOpenChange(nextOpen: boolean) {
     onOpenChange(nextOpen);
 
+    if (nextOpen) {
+      reset();
+    }
+
     if (!nextOpen) {
       if (closeTimeoutRef.current) {
         clearTimeout(closeTimeoutRef.current);
@@ -274,6 +296,13 @@ export function CreateMandateDialog({
       reset();
     }
   }
+
+  React.useEffect(() => {
+    if (open && !wasOpenRef.current) {
+      reset();
+    }
+    wasOpenRef.current = open;
+  }, [open]);
 
   const selectedAssetLabel =
     spendAsset === "SUI" ? "SUI vault" : "DeepBook USDC vault";
@@ -544,7 +573,7 @@ export function CreateMandateDialog({
             Create Mandate
           </DialogTitle>
           <DialogDescription className="mt-1 text-sm">
-            Grant an AI agent revocable spending authority on Sui.
+            Define a capped mandate once. Let the agent execute within policy.
           </DialogDescription>
         </DialogHeader>
 
@@ -555,7 +584,7 @@ export function CreateMandateDialog({
                 <FieldLabel htmlFor="mandate-label">Label</FieldLabel>
                 <Input
                   id="mandate-label"
-                  placeholder="DEEP_SUI trading mandate"
+                  placeholder="Enter a mandate label"
                   value={label}
                   onChange={(e) => setLabel(e.target.value)}
                 />
@@ -565,7 +594,7 @@ export function CreateMandateDialog({
               </Field>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 border-t border-cyan-400/10 pt-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 border-t border-cyan-400/10 pt-4">
               <Field>
                 <FieldLabel>Spend asset</FieldLabel>
                 <Select
@@ -589,10 +618,10 @@ export function CreateMandateDialog({
                     </SelectGroup>
                   </SelectContent>
                 </Select>
-                <FieldDescription>
-                  SUI vault is the current executable demo route. DeepBook USDC
-                  vault support is wired but disabled until the current network
-                  has a fillable pool.
+                <FieldDescription className="truncate">
+                  {spendAsset === "SUI"
+                    ? "SUI is deposited into the Mandate vault and spent under policy limits."
+                    : "Asset deposited into the Mandate vault and used by the agent."}
                 </FieldDescription>
               </Field>
             </div>

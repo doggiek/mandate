@@ -30,6 +30,10 @@ export const MANDATE_EVENT_TYPES = {
 let rpcClient: SuiJsonRpcClient | null = null
 let loggedRpcConfig = false
 
+function browserRpcUrl() {
+  return typeof window === "undefined" ? getRpcUrl() : "/api/sui-rpc"
+}
+
 function networkPackageEnvName(network: SuiNetwork) {
   return `NEXT_PUBLIC_PACKAGE_ID_${network.toUpperCase()}`
 }
@@ -53,7 +57,8 @@ export function getSuiRpcClient() {
     if (process.env.NODE_ENV !== "production" && !loggedRpcConfig) {
       console.info("[MANDATE] RPC config", {
         network: NETWORK,
-        rpcUrl: getRpcUrl(),
+        rpcUrl: browserRpcUrl(),
+        upstreamRpcUrl: getRpcUrl(),
         packageId: PACKAGE_ID,
         packageIdSource: PACKAGE_ID_SOURCE,
       })
@@ -62,7 +67,7 @@ export function getSuiRpcClient() {
 
     rpcClient = new SuiJsonRpcClient({
       network: NETWORK,
-      url: getRpcUrl(),
+      url: browserRpcUrl(),
     })
   }
 

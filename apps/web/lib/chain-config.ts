@@ -18,6 +18,8 @@ const PUBLIC_ENV: Record<string, string | undefined> = {
     process.env.NEXT_PUBLIC_SPEND_COIN_TYPE_TESTNET,
   NEXT_PUBLIC_BUY_COIN_TYPE_TESTNET:
     process.env.NEXT_PUBLIC_BUY_COIN_TYPE_TESTNET,
+  NEXT_PUBLIC_EXECUTION_AMOUNT_TESTNET:
+    process.env.NEXT_PUBLIC_EXECUTION_AMOUNT_TESTNET,
   NEXT_PUBLIC_EXPLORER_BASE_URL_TESTNET:
     process.env.NEXT_PUBLIC_EXPLORER_BASE_URL_TESTNET,
   NEXT_PUBLIC_DEEPBOOK_POOL_KEY_MAINNET:
@@ -28,6 +30,8 @@ const PUBLIC_ENV: Record<string, string | undefined> = {
     process.env.NEXT_PUBLIC_SPEND_COIN_TYPE_MAINNET,
   NEXT_PUBLIC_BUY_COIN_TYPE_MAINNET:
     process.env.NEXT_PUBLIC_BUY_COIN_TYPE_MAINNET,
+  NEXT_PUBLIC_EXECUTION_AMOUNT_MAINNET:
+    process.env.NEXT_PUBLIC_EXECUTION_AMOUNT_MAINNET,
   NEXT_PUBLIC_EXPLORER_BASE_URL_MAINNET:
     process.env.NEXT_PUBLIC_EXPLORER_BASE_URL_MAINNET,
   NEXT_PUBLIC_DEEPBOOK_POOL_KEY_DEEP_SUI:
@@ -162,6 +166,7 @@ export type ActiveDeepBookRouteConfig = {
   poolId: string;
   spendCoinType: string;
   buyCoinType: string;
+  executionAmount: number;
   configured: boolean;
   unavailableReason?: string;
 };
@@ -205,6 +210,11 @@ export function getActiveDeepBookRouteConfig(
   const spendCoinType =
     envValue(env, `NEXT_PUBLIC_SPEND_COIN_TYPE_${suffix}`) || SUI_COIN_TYPE;
   const buyCoinType = envValue(env, `NEXT_PUBLIC_BUY_COIN_TYPE_${suffix}`);
+  const executionAmountRaw = envValue(
+    env,
+    `NEXT_PUBLIC_EXECUTION_AMOUNT_${suffix}`,
+  );
+  const executionAmount = Number(executionAmountRaw);
   const configured = Boolean(poolKey && poolId && spendCoinType);
 
   return {
@@ -213,6 +223,12 @@ export function getActiveDeepBookRouteConfig(
     poolId,
     spendCoinType,
     buyCoinType,
+    executionAmount:
+      Number.isFinite(executionAmount) && executionAmount > 0
+        ? executionAmount
+        : network === "testnet"
+          ? 1
+          : 0.001,
     configured,
     unavailableReason: configured
       ? undefined

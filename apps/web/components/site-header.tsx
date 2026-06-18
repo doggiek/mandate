@@ -1,41 +1,42 @@
-'use client'
+"use client";
 
-import { useEffect, useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
+import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 const links = [
-  { label: 'Problem', href: '#problem' },
-  { label: 'Use Case', href: '#use-case' },
-  { label: 'How it works', href: '#how-it-works' },
-  { label: 'Architecture', href: '#architecture' },
-  { label: 'Activity', href: '#activity' },
-  { label: 'Security', href: '#security' },
-]
+  { label: "Why Mandate", href: "#why-mandate" },
+  { label: "Problem", href: "#problem" },
+  { label: "How It works", href: "#how-it-works" },
+  { label: "Product Video", href: "#product-demo" },
+  { label: "Architecture", href: "#architecture" },
+  { label: "Activity", href: "#activity" },
+  { label: "Security", href: "#security" },
+];
 
 export function SiteHeader() {
-  const [scrolled, setScrolled] = useState(false)
+  const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 12)
-    onScroll()
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
-  }, [])
+    const onScroll = () => setScrolled(window.scrollY > 12);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   return (
     <header
       className={cn(
-        'fixed inset-x-0 top-0 z-50 transition-colors duration-300',
-        scrolled ? 'glass border-b border-border' : 'border-b border-transparent',
+        "fixed inset-x-0 top-0 z-50 transition-colors duration-300",
+        scrolled
+          ? "glass border-b border-border"
+          : "border-b border-transparent",
       )}
     >
       <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
         <a href="#" className="flex items-center gap-2.5">
           <Logo />
-          <span className="text-sm font-semibold tracking-tight">
-            Mandate
-          </span>
+          <span className="text-sm font-semibold tracking-tight">Mandate</span>
         </a>
 
         <div className="hidden items-center gap-8 md:flex">
@@ -71,7 +72,7 @@ export function SiteHeader() {
         </div>
       </nav>
     </header>
-  )
+  );
 }
 
 function Logo() {
@@ -81,5 +82,5 @@ function Logo() {
       alt="Mandate"
       className="h-8 w-8 rounded-lg object-contain"
     />
-  )
+  );
 }

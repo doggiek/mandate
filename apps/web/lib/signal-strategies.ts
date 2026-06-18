@@ -42,19 +42,6 @@ export const SIGNAL_STRATEGIES: SignalStrategy[] = [
       : "coming_soon",
   },
   {
-    id: "deep_sui_rebalance_sell",
-    name: "DEEP Rebalance",
-    description: "Sell DEEP back to SUI when exit conditions are met.",
-    source: "deepbook_quote",
-    signalType: "price_momentum",
-    market: "DEEP/SUI",
-    direction: "either",
-    thresholdPct: 5,
-    actionLabel: "Sell DEEP for SUI",
-    executionAmountSui: 0,
-    status: "coming_soon",
-  },
-  {
     id: "sui_price_momentum",
     name: "SUI Momentum",
     description: "Disabled route: SUI/USD signal with future test USDC spend.",
@@ -92,7 +79,7 @@ export const SIGNAL_STRATEGIES: SignalStrategy[] = [
     direction: "either",
     thresholdPct: 8,
     actionLabel: "Follow flow signal",
-    executionAmountSui: 0.001,
+    executionAmountSui: 0,
     status: "coming_soon",
   },
 ];

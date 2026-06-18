@@ -66,7 +66,10 @@ export function AppSidebar({
   return (
     <Sidebar collapsible="icon" className="border-sidebar-border">
       <SidebarHeader className="border-b border-sidebar-border">
-        <div className="flex items-center gap-2.5 px-1.5 py-1.5">
+        <Link
+          href="/"
+          className="flex items-center gap-2.5 rounded-lg px-1.5 py-1.5 transition-opacity hover:opacity-85"
+        >
           <img
             src="/brand/mandate-logo-light.png"
             alt="Mandate"
@@ -80,7 +83,7 @@ export function AppSidebar({
               Console · Sui
             </span>
           </div>
-        </div>
+        </Link>
       </SidebarHeader>
 
       <SidebarContent>

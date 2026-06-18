@@ -2,6 +2,10 @@
 
 import { AgentExecutionPanel } from "@/components/agent-execution-panel"
 
-export function AutomationView() {
-  return <AgentExecutionPanel />
+export function AutomationView({
+  onSelectMandate,
+}: {
+  onSelectMandate: (id: string) => void
+}) {
+  return <AgentExecutionPanel onSelectMandate={onSelectMandate} />
 }

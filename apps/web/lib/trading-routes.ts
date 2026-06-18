@@ -59,7 +59,7 @@ export const TRADING_ROUTES: TradingRoute[] = [
       poolId: deepSuiPoolId,
       inputDecimals: 9,
       outputDecimals: 6,
-      executionAmount: 1,
+      executionAmount: activeDeepBookRoute.executionAmount,
       executable: activeDeepBookRoute.configured,
       unavailableReason: activeDeepBookRoute.unavailableReason,
     },

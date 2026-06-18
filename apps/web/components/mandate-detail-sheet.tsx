@@ -13,7 +13,6 @@ import {
   Ban,
   CheckCircle2,
   ShieldCheck,
-  WalletCards,
 } from "lucide-react";
 
 import { ActivityFeed } from "@/components/activity-feed";
@@ -36,6 +35,7 @@ import {
   CLOCK_OBJECT_ID,
   DUSDC_COIN_TYPE,
   DEEPBOOK_POOL_ID,
+  DEEPBOOK_POOL_ID_SUI_DUSDC,
   DEEPBOOK_POOL_KEY,
   isCurrentMandateObjectType,
   NETWORK,
@@ -106,10 +106,26 @@ function executionFillLabel(execution: {
     return "Failed";
   }
   if (execution.fillStatus === "filled") {
-    return "Filled";
+    return "Executed";
   }
   if (execution.fillStatus === "no_fill") {
     return "No fill";
+  }
+  return "Amount unavailable";
+}
+
+function executionFillSubtext(execution: {
+  status: string;
+  fillStatus?: "filled" | "no_fill" | "amount_unavailable";
+}) {
+  if (execution.status === "failed") {
+    return "Transaction failed";
+  }
+  if (execution.fillStatus === "filled") {
+    return "Swap filled";
+  }
+  if (execution.fillStatus === "no_fill") {
+    return "Residual returned";
   }
   return "Amount unavailable";
 }
@@ -128,6 +144,40 @@ function executionFillClass(execution: {
     return "border-amber-500/25 bg-amber-500/10 text-amber-400";
   }
   return "border-border bg-background/60 text-muted-foreground";
+}
+
+function executionInputLabel(execution: {
+  inputAmount?: number;
+  inputAsset?: string;
+  amountSui?: number;
+}) {
+  if (typeof execution.inputAmount === "number") {
+    return `${execution.inputAmount} ${execution.inputAsset ?? "SUI"}`;
+  }
+  if (typeof execution.amountSui === "number") {
+    return formatSui(execution.amountSui);
+  }
+  return "0.001 SUI";
+}
+
+function executionResidualLabel(execution: {
+  residualSuiAmount?: number;
+  residualAmount?: number;
+  residualAsset?: string;
+}) {
+  if (typeof execution.residualSuiAmount === "number") {
+    return formatSui(execution.residualSuiAmount);
+  }
+  if (typeof execution.residualAmount === "number" && execution.residualAsset) {
+    return `${execution.residualAmount} ${execution.residualAsset}`;
+  }
+  return "-";
+}
+
+function executionPoolId(execution: { pair?: string }) {
+  return execution.pair === "SUI_DUSDC"
+    ? DEEPBOOK_POOL_ID_SUI_DUSDC
+    : DEEPBOOK_POOL_ID;
 }
 
 function getErrorMessage(error: unknown) {
@@ -172,31 +222,6 @@ function objectTypeFromResponse(
 
 function assetMandateTypeArg(objectType?: string) {
   return objectType?.match(/AssetMandate<(.+)>/)?.[1];
-}
-
-function DetailMetric({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: React.ReactNode;
-  tone?: "danger" | "primary";
-}) {
-  return (
-    <div
-      className={cn(
-        "rounded-lg border border-border bg-card/70 p-3",
-        tone === "danger" && "border-destructive/25 bg-destructive/10",
-        tone === "primary" && "border-primary/25 bg-primary/10",
-      )}
-    >
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <div className="mt-1 min-w-0 text-sm font-medium text-foreground">
-        {value}
-      </div>
-    </div>
-  );
 }
 
 export function MandateDetailSheet({
@@ -304,8 +329,6 @@ export function MandateDetailSheet({
     ? (mandate.remainingVaultBalance ??
       Math.max(mandate.budget - mandate.spent, 0))
     : 0;
-  const agentAddress = mandate?.agentAddress;
-  const ownerAddress = mandate?.ownerAddress;
   const isLatestPackageMandate =
     Boolean(mandate) && isCurrentMandateObjectType(mandate?.objectType);
   const isKnownOlderPackageMandate =
@@ -503,33 +526,41 @@ export function MandateDetailSheet({
       <SheetContent
         ref={sheetContentRef}
         tabIndex={-1}
-        className="!fixed !right-0 !top-0 z-50 !h-screen w-full overflow-hidden border-border bg-background/95 p-0 backdrop-blur-xl focus:outline-none sm:max-w-xl"
+        className="!fixed !right-0 !top-0 z-50 !h-screen w-full overflow-hidden border-border bg-background/95 p-0 backdrop-blur-xl focus:outline-none sm:max-w-2xl"
       >
         {mandate ? (
           <>
             <SheetHeader className="shrink-0 border-b border-border p-5">
               <div className="flex items-start justify-between gap-4 pr-8">
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="flex size-8 items-center justify-center rounded-lg border border-primary/25 bg-primary/10 text-primary">
                       <ShieldCheck className="size-4" />
                     </span>
                     <StatusBadge status={mandate.status} />
                   </div>
-                  <SheetTitle className="mt-3 truncate text-xl">
+                  <SheetTitle
+                    className="mt-3 block max-w-[28rem] truncate whitespace-nowrap text-xl leading-tight sm:max-w-[34rem]"
+                    title={mandate.label}
+                  >
                     {mandate.label}
                   </SheetTitle>
                   <SheetDescription className="sr-only">
                     Mandate object on {NETWORK}
                   </SheetDescription>
                   <div className="mt-1 flex min-w-0 items-center gap-1 text-sm text-muted-foreground">
-                    <CopyableId value={mandate.id} label="mandate id" /> ·{" "}
-                    {NETWORK}
+                    <CopyableId value={mandate.id} label="mandate id" />
+                    <ExplorerLink
+                      objectId={mandate.id}
+                      label="View mandate object on Suivision"
+                    />
+                    <span aria-hidden="true">·</span>
+                    <span>{NETWORK}</span>
                   </div>
                 </div>
                 <Badge
                   variant="outline"
-                  className="border-primary/30 bg-primary/10 text-primary"
+                  className="shrink-0 border-primary/30 bg-primary/10 text-primary"
                 >
                   {DEEPBOOK_POOL_KEY}
                 </Badge>
@@ -619,77 +650,70 @@ export function MandateDetailSheet({
               <section className="rounded-xl border border-border bg-card/60 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-sm font-medium">Budget policy</h3>
+                    <h3 className="text-sm font-medium">Policy limits</h3>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Spend is enforced before every authorized DeepBook action.
+                      Budget, per-transaction cap, protocol scope, and
+                      expiration are enforced before every agent execution.
                     </p>
                   </div>
-                  <WalletCards className="size-4 text-primary" />
                 </div>
-                <BudgetMeter
-                  spent={mandate.spent}
-                  budget={mandate.budget}
-                  className="mt-4"
-                  symbol={mandate.assetSymbol ?? "SUI"}
-                />
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <DetailMetric
-                    label="Budget ceiling"
-                    value={formatMandateAsset(mandate.budget, mandate)}
-                    tone="primary"
-                  />
-                  <DetailMetric
-                    label="Remaining"
-                    value={formatMandateAsset(remaining, mandate)}
-                  />
-                  <DetailMetric
-                    label="Spent"
-                    value={formatMandateAsset(mandate.spent, mandate)}
-                  />
-                  <DetailMetric
-                    label="Max single transaction"
-                    value={formatMandateAsset(mandate.txLimit, mandate)}
+                <div className="mt-4">
+                  <div className="mb-2 flex items-center justify-between gap-3 text-xs">
+                    <span className="text-muted-foreground">Budget used</span>
+                    <span className="font-medium tabular-nums text-foreground">
+                      {formatMandateAsset(mandate.spent, mandate)} /{" "}
+                      {formatMandateAsset(mandate.budget, mandate)}
+                    </span>
+                  </div>
+                  <BudgetMeter
+                    spent={mandate.spent}
+                    budget={mandate.budget}
+                    showLabel={false}
+                    symbol={mandate.assetSymbol ?? "SUI"}
                   />
                 </div>
-              </section>
-
-              <section className="grid gap-3 sm:grid-cols-2">
-                <DetailMetric
-                  label="Owner address"
-                  value={
-                    ownerAddress ? (
-                      <CopyableId value={ownerAddress} label="owner address" />
-                    ) : (
-                      "-"
-                    )
-                  }
-                />
-                <DetailMetric
-                  label="Agent address"
-                  value={
-                    agentAddress ? (
-                      <CopyableId value={agentAddress} label="agent address" />
-                    ) : (
-                      "-"
-                    )
-                  }
-                />
-                <DetailMetric label="Protocol scope" value="DeepBook only" />
-                <DetailMetric
-                  label="Expiration"
-                  value={
-                    mandate.expiresLabel ??
-                    stableExpiryLabel(mandate.expiresAt, mandate.status)
-                  }
-                />
+                <div className="mt-4 grid gap-2 text-xs sm:grid-cols-2">
+                  {[
+                    {
+                      label: "Budget ceiling",
+                      value: formatMandateAsset(mandate.budget, mandate),
+                    },
+                    {
+                      label: "Max tx",
+                      value: formatMandateAsset(mandate.txLimit, mandate),
+                    },
+                    { label: "Protocol", value: "DeepBook only" },
+                    {
+                      label: "Expiration",
+                      value:
+                        mandate.expiresLabel ??
+                        stableExpiryLabel(mandate.expiresAt, mandate.status),
+                    },
+                  ].map((item) => (
+                    <div
+                      key={item.label}
+                      className="flex min-h-16 min-w-0 flex-col justify-center rounded-lg border border-border/70 bg-background/35 px-3 py-2.5"
+                    >
+                      <span className="truncate text-muted-foreground">
+                        {item.label}
+                      </span>
+                      <span
+                        className="mt-1 min-w-0 truncate font-medium text-foreground"
+                        title={item.value}
+                      >
+                        {item.value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </section>
 
               <section className="rounded-xl border border-border bg-card/60">
                 <div className="flex items-center justify-between gap-3 p-4">
                   <div>
-                    <h3 className="text-sm font-medium">Recent activity</h3>
+                    <h3 className="text-sm font-medium">Recent Activity</h3>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      On-chain activity log preview.
+                      Latest on-chain events for this mandate.
                     </p>
                   </div>
                 </div>
@@ -707,111 +731,99 @@ export function MandateDetailSheet({
 
               <section className="rounded-xl border border-border bg-card/60">
                 <div className="p-4">
-                  <h3 className="text-sm font-medium">
-                    Related DeepBook executions
-                  </h3>
+                  <h3 className="text-sm font-medium">DeepBook Orders</h3>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Successful Run Agent records linked to this mandate.
+                    Real swap records executed through this mandate.
                   </p>
                 </div>
                 <Separator />
                 <div className="divide-y divide-border">
                   {mandateOrders.length > 0 ? (
-                    mandateOrders.map((execution) => (
-                      <div
-                        key={execution.id}
-                        className="grid grid-cols-[1fr_auto] gap-3 px-4 py-3"
-                      >
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <CopyableId
-                              value={execution.digest}
-                              label="digest"
-                              className="text-sm text-foreground"
-                            />
-                            <Badge
-                              variant="outline"
-                              className={executionFillClass(execution)}
-                            >
-                              {executionFillLabel(execution)}
-                            </Badge>
-                          </div>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {execution.pair ?? DEEPBOOK_POOL_KEY} ·{" "}
-                            {execution.side ?? "Buy"} ·{" "}
-                            {typeof execution.inputAmount === "number"
-                              ? `${execution.inputAmount} ${execution.inputAsset ?? "SUI"} input`
-                              : typeof execution.amountSui === "number"
-                                ? `${formatSui(execution.amountSui)} input`
-                                : "0.001 SUI input"}{" "}
-                            · {executionTime(execution.timestamp)}
-                          </p>
-                          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                            <span>
-                              Input:{" "}
-                              {typeof execution.inputAmount === "number"
-                                ? `${execution.inputAmount} ${execution.inputAsset ?? "SUI"}`
-                                : typeof execution.amountSui === "number"
-                                  ? formatSui(execution.amountSui)
-                                  : "0.001 SUI"}
-                            </span>
-                            <span>
-                              Output: {executionOutputSummary(execution)}
-                            </span>
-                            {typeof execution.residualSuiAmount ===
-                              "number" && (
-                              <span>
-                                Residual:{" "}
-                                {formatSui(execution.residualSuiAmount)}
-                              </span>
-                            )}
-                            {typeof execution.residualAmount === "number" &&
-                              execution.residualAsset && (
-                                <span>
-                                  Residual: {execution.residualAmount}{" "}
-                                  {execution.residualAsset}
-                                </span>
-                              )}
-                            {execution.outputCoinObjectIds?.length ? (
-                              <span>
-                                Output objects:{" "}
-                                {execution.outputCoinObjectIds.length}
-                              </span>
-                            ) : null}
-                            {execution.outputOwner && (
-                              <span className="inline-flex items-center gap-1">
-                                Owner:
+                    mandateOrders.map((execution) => {
+                      const poolId = executionPoolId(execution);
+                      return (
+                        <div key={execution.id} className="px-4 py-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                <Badge
+                                  variant="outline"
+                                  className={executionFillClass(execution)}
+                                >
+                                  {executionFillLabel(execution)}
+                                </Badge>
                                 <CopyableId
-                                  value={execution.outputOwner}
-                                  label="output owner"
+                                  value={execution.digest}
+                                  label="DeepBook order digest"
+                                  className="text-sm font-medium text-foreground"
                                 />
-                              </span>
-                            )}
-                            <span className="inline-flex items-center gap-1">
-                              Pool:
-                              <CopyableId
-                                value={DEEPBOOK_POOL_ID}
-                                label="DeepBook pool object id"
-                              />
-                              <ExplorerLink
-                                objectId={DEEPBOOK_POOL_ID}
-                                label="View DeepBook pool on Suivision"
-                              />
+                                <ExplorerLink
+                                  digest={execution.digest}
+                                  label="View DeepBook order on Suivision"
+                                />
+                              </div>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {executionFillSubtext(execution)}
+                              </p>
+                              <p className="mt-1 truncate text-xs text-muted-foreground">
+                                {execution.pair ?? DEEPBOOK_POOL_KEY} ·{" "}
+                                {execution.side ?? "Buy"}
+                              </p>
+                              <p className="mt-2 text-sm text-foreground">
+                                <span className="text-muted-foreground">
+                                  Input:
+                                </span>{" "}
+                                {executionInputLabel(execution)}
+                                <span className="text-muted-foreground">
+                                  {" "}
+                                  · Output:
+                                </span>{" "}
+                                {executionOutputSummary(execution)}
+                              </p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                Residual returned:{" "}
+                                {executionResidualLabel(execution)}
+                              </p>
+                              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                                {poolId ? (
+                                  <span className="inline-flex min-w-0 items-center gap-1">
+                                    Pool:
+                                    <CopyableId
+                                      value={poolId}
+                                      label="DeepBook pool object id"
+                                    />
+                                    <ExplorerLink
+                                      objectId={poolId}
+                                      label="View DeepBook pool on Suivision"
+                                    />
+                                  </span>
+                                ) : null}
+                                {execution.outputOwner ? (
+                                  <span className="inline-flex min-w-0 items-center gap-1">
+                                    Owner:
+                                    <CopyableId
+                                      value={execution.outputOwner}
+                                      label="output owner"
+                                    />
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                              {executionTime(execution.timestamp)}
+                            </span>
+                          </div>
+                          <div className="mt-2 text-right text-xs text-muted-foreground">
+                            Gas fee:{" "}
+                            <span className="font-mono">
+                              {typeof execution.gasFeeSui === "number"
+                                ? formatSui(execution.gasFeeSui)
+                                : "-"}
                             </span>
                           </div>
                         </div>
-                        <div className="flex flex-col items-end gap-1">
-                          <span className="text-[11px] text-muted-foreground">
-                            Gas Fee
-                          </span>
-                          <span className="font-mono text-xs text-muted-foreground">
-                            {typeof execution.gasFeeSui === "number"
-                              ? formatSui(execution.gasFeeSui)
-                              : "-"}
-                          </span>
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   ) : (
                     <p className="px-4 py-5 text-sm text-muted-foreground">
                       No DeepBook executions linked yet.
@@ -871,46 +883,44 @@ export function MandateDetailSheet({
                       </Badge>
                     </div>
                     <p className="text-xs leading-relaxed text-muted-foreground">
-                        {mandate.status === "active"
-                          ? "Revocation is signed by the owner wallet. Remaining vault funds are withdrawn back to the owner."
-                          : canWithdraw
-                            ? "Remaining vault funds can be withdrawn by the owner wallet."
-                            : "No remaining vault funds are available to withdraw."}
+                      {mandate.status === "active"
+                        ? "Revocation is signed by the owner wallet. Remaining vault funds are withdrawn back to the owner."
+                        : canWithdraw
+                          ? "Remaining vault funds can be withdrawn by the owner wallet."
+                          : "No remaining vault funds are available to withdraw."}
                     </p>
                     <div className="flex justify-end">
-                    {mandate.status === "active" ? (
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        disabled={!canRevoke || isRevoking}
-                        onClick={() => setConfirmingRevoke(true)}
-                        title={
-                          isLatestPackageMandate
-                            ? "Permanently revoke owner-granted agent permission"
-                            : isKnownOlderPackageMandate
-                              ? OLD_PACKAGE_MESSAGE
-                              : "Verifying Mandate package before revoke"
-                        }
-                      >
-                        {isRevoking ? "Revoking" : "Revoke + Withdraw"}
-                      </Button>
-                    ) : canWithdraw ? (
-                      <Button
-                        variant="default"
-                        size="sm"
-                        disabled={isWithdrawing}
-                        onClick={handleWithdraw}
-                        title="Withdraw remaining vault funds back to the owner wallet"
-                      >
-                        {isWithdrawing
-                          ? "Withdrawing"
-                          : "Withdraw"}
-                      </Button>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">
-                        No actions available.
-                      </p>
-                    )}
+                      {mandate.status === "active" ? (
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          disabled={!canRevoke || isRevoking}
+                          onClick={() => setConfirmingRevoke(true)}
+                          title={
+                            isLatestPackageMandate
+                              ? "Permanently revoke owner-granted agent permission"
+                              : isKnownOlderPackageMandate
+                                ? OLD_PACKAGE_MESSAGE
+                                : "Verifying Mandate package before revoke"
+                          }
+                        >
+                          {isRevoking ? "Revoking" : "Revoke + Withdraw"}
+                        </Button>
+                      ) : canWithdraw ? (
+                        <Button
+                          variant="default"
+                          size="sm"
+                          disabled={isWithdrawing}
+                          onClick={handleWithdraw}
+                          title="Withdraw remaining vault funds back to the owner wallet"
+                        >
+                          {isWithdrawing ? "Withdrawing" : "Withdraw"}
+                        </Button>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          No actions available.
+                        </p>
+                      )}
                     </div>
                   </div>
                 )}
