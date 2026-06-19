@@ -28,6 +28,7 @@ import {
   SelectTrigger,
 } from "@/components/ui/select";
 import {
+  DEEPBOOK_POOL_ID,
   DEEPBOOK_POOL_KEY,
   NETWORK,
   PACKAGE_ID,
@@ -633,6 +634,15 @@ function orderResidualLabel(order: {
   return "";
 }
 
+function orderResidualValue(order: {
+  residualSuiAmount?: number;
+  residualAmount?: number;
+  residualAsset?: string;
+}) {
+  const label = orderResidualLabel(order);
+  return label.replace(/\s+returned$/, "") || "-";
+}
+
 function orderStatusLabel(order: {
   status: string;
   fillStatus?: "filled" | "no_fill" | "amount_unavailable";
@@ -649,6 +659,22 @@ function orderStatusLabel(order: {
   return "Amount unavailable";
 }
 
+function orderStatusSubtext(order: {
+  status: string;
+  fillStatus?: "filled" | "no_fill" | "amount_unavailable";
+}) {
+  if (order.status === "failed") {
+    return "Transaction failed";
+  }
+  if (order.fillStatus === "no_fill") {
+    return "Input returned as residual";
+  }
+  if (order.fillStatus === "filled") {
+    return "Swap filled";
+  }
+  return "Output details unavailable";
+}
+
 function orderStatusClass(order: {
   status: string;
   fillStatus?: "filled" | "no_fill" | "amount_unavailable";
@@ -663,6 +689,31 @@ function orderStatusClass(order: {
     return "border-emerald-500/25 bg-emerald-500/10 text-emerald-400";
   }
   return "border-border bg-background/60 text-muted-foreground";
+}
+
+function relativeOrderTime(timestamp?: number) {
+  if (!timestamp) {
+    return "-";
+  }
+
+  const diffMs = Math.max(0, Date.now() - timestamp);
+  const seconds = Math.floor(diffMs / 1000);
+  if (seconds < 60) {
+    return "just now";
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h ago`;
+  }
+
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 function formatSignalChange(value?: number) {
@@ -2869,7 +2920,7 @@ export function AgentExecutionPanel({
           </div>
 
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.9fr)]">
-            <div className="min-w-0 rounded-lg border border-border bg-background/45">
+            <div className="flex min-w-0 flex-col rounded-lg border border-border bg-background/45">
               <div className="flex items-start justify-between gap-3 border-b border-border px-3 py-3">
                 <div>
                   <h4 className="text-sm font-semibold text-foreground">
@@ -2909,7 +2960,7 @@ export function AgentExecutionPanel({
                     Latest DeepBook Order
                   </h4>
                   <p className="text-xs text-muted-foreground">
-                    Last DeepBook order executed under this mandate.
+                    Latest order for this mandate.
                   </p>
                 </div>
                 <Link
@@ -2921,25 +2972,49 @@ export function AgentExecutionPanel({
               </div>
 
               {latestMandateOrder ? (
-                <div className="space-y-3 p-3">
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <SummaryChip
-                      label="Market"
-                      value={latestMandateOrder.pair ?? DEEPBOOK_POOL_KEY}
-                    />
-                    <SummaryChip
-                      label="Status"
-                      value={
+                <div className="flex flex-1 flex-col gap-5 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <CopyableId
+                          value={latestMandateOrder.digest}
+                          label="DeepBook order digest"
+                          className="text-sm font-semibold text-foreground"
+                        />
+                        <ExplorerLink digest={latestMandateOrder.digest} />
+                      </div>
+
+                      <div className="mt-2 flex items-center gap-2">
                         <Badge
                           variant="outline"
                           className={cn(
-                            "w-fit",
+                            "h-6 px-2",
                             orderStatusClass(latestMandateOrder),
                           )}
                         >
                           {orderStatusLabel(latestMandateOrder)}
                         </Badge>
-                      }
+
+                        <span className="text-xs text-muted-foreground">
+                          {orderStatusSubtext(latestMandateOrder)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="shrink-0 pt-1 text-xs text-muted-foreground">
+                      {relativeOrderTime(latestMandateOrder.timestamp)}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <SummaryChip
+                      label="Market"
+                      value={latestMandateOrder.pair ?? DEEPBOOK_POOL_KEY}
+                      mono
+                    />
+                    <SummaryChip
+                      label="Direction"
+                      value={latestMandateOrder.side ?? "Buy"}
                     />
                     <SummaryChip
                       label="Input"
@@ -2950,27 +3025,54 @@ export function AgentExecutionPanel({
                       label="Output"
                       value={orderOutputLabel(latestMandateOrder)}
                     />
+                    <SummaryChip
+                      label="Residual returned"
+                      value={orderResidualValue(latestMandateOrder)}
+                      mono
+                    />
+                    <SummaryChip
+                      label="Gas fee"
+                      value={
+                        typeof latestMandateOrder.gasFeeSui === "number"
+                          ? formatSui(latestMandateOrder.gasFeeSui)
+                          : "-"
+                      }
+                      mono
+                    />
                   </div>
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 bg-background/50 px-3 py-2 text-xs text-muted-foreground">
-                    <span className="min-w-0 truncate">
-                      {latestMandateOrder.fillStatus === "filled"
-                        ? "Swap filled"
-                        : latestMandateOrder.fillStatus === "no_fill"
-                          ? "Input returned as residual"
-                          : latestMandateOrder.status === "failed"
-                            ? "Transaction failed"
-                            : "Output details unavailable"}
-                      {orderResidualLabel(latestMandateOrder)
-                        ? ` · ${orderResidualLabel(latestMandateOrder)}`
-                        : ""}
-                    </span>
-                    <span className="inline-flex shrink-0 items-center gap-1">
+
+                  <div className="space-y-3 text-xs text-muted-foreground">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <span className="shrink-0">Mandate:</span>
+                      <span
+                        className="min-w-0 truncate text-foreground"
+                        title={latestMandateOrder.mandateLabel}
+                      >
+                        {latestMandateOrder.mandateLabel}
+                      </span>
                       <CopyableId
-                        value={latestMandateOrder.digest}
-                        label="DeepBook order digest"
+                        value={latestMandateOrder.mandateId}
+                        label="Mandate object id"
                       />
-                      <ExplorerLink digest={latestMandateOrder.digest} />
-                    </span>
+                      <ExplorerLink objectId={latestMandateOrder.mandateId} />
+                    </div>
+
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <span className="shrink-0">Pool:</span>
+                      <CopyableId
+                        value={
+                          selectedTradingRoute?.action.poolId ??
+                          DEEPBOOK_POOL_ID
+                        }
+                        label="DeepBook pool object id"
+                      />
+                      <ExplorerLink
+                        objectId={
+                          selectedTradingRoute?.action.poolId ??
+                          DEEPBOOK_POOL_ID
+                        }
+                      />
+                    </div>
                   </div>
                 </div>
               ) : (

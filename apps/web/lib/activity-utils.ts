@@ -1,6 +1,10 @@
 import type { ActivityEvent } from "@/lib/mandate-data"
 
 function activityTimeValue(event: ActivityEvent) {
+  if (event.timeDisplay === "syncing") {
+    return Number.MAX_SAFE_INTEGER
+  }
+
   if (typeof event.timestampMs === "number" && Number.isFinite(event.timestampMs)) {
     return event.timestampMs
   }
