@@ -5,13 +5,13 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const links = [
-  { label: "Why Mandate", href: "#why-mandate" },
   { label: "Problem", href: "#problem" },
-  { label: "How It works", href: "#how-it-works" },
+  { label: "How it works", href: "#how-it-works" },
   { label: "Product Video", href: "#product-demo" },
   { label: "Architecture", href: "#architecture" },
   { label: "Activity", href: "#activity" },
   { label: "Security", href: "#security" },
+  { label: "Future Vision", href: "#future-vision" },
 ];
 
 export function SiteHeader() {

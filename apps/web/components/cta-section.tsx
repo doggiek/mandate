@@ -14,9 +14,13 @@ export function CtaSection() {
 
       <div className="relative mx-auto max-w-3xl px-4 text-center sm:px-6">
         <h2 className="text-balance text-3xl font-medium tracking-tight sm:text-5xl">
-          Grant authority once.
-          <br className="hidden sm:block" /> Let the agent execute within
-          limits.
+          <span className="block">
+            AI agents are stuck behind the approve wall.
+          </span>
+          <span className="mt-3 block">
+            Mandate removes that wall —
+            <br className="hidden sm:block" /> without giving up control.
+          </span>
         </h2>
         <p className="mx-auto mt-5 max-w-xl text-pretty text-lg leading-relaxed text-muted-foreground">
           Mandate gives an AI agent a capped budget and protocol scope on Sui —

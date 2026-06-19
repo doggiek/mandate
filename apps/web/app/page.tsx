@@ -7,6 +7,7 @@ import { HowItWorks } from "@/components/how-it-works";
 import { Architecture } from "@/components/architecture";
 import { ActivityLog } from "@/components/activity-log";
 import { SecurityControls } from "@/components/security-controls";
+import { FutureVision } from "@/components/future-vision";
 import { CtaSection, SiteFooter } from "@/components/cta-section";
 
 export default function Page() {
@@ -22,6 +23,7 @@ export default function Page() {
         <Architecture />
         <ActivityLog />
         <SecurityControls />
+        <FutureVision />
         <CtaSection />
       </main>
       <SiteFooter />
