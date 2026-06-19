@@ -108,6 +108,29 @@ function requireSuiAddressEnv(name: string): string {
   return value;
 }
 
+function requireSuiAddressValue(label: string, value: string | undefined) {
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${label}`);
+  }
+  const trimmed = value.trim();
+  if (!isValidSuiAddress(trimmed)) {
+    throw new Error(
+      `${label} must be a valid Sui object/address id, got: ${trimmed}`,
+    );
+  }
+  return trimmed;
+}
+
+function activePackageId() {
+  const networkSuffix = activeNetwork().toUpperCase();
+  return requireSuiAddressValue(
+    `PACKAGE_ID or NEXT_PUBLIC_PACKAGE_ID_${networkSuffix}`,
+    process.env.PACKAGE_ID ??
+      process.env[`NEXT_PUBLIC_PACKAGE_ID_${networkSuffix}`] ??
+      process.env.NEXT_PUBLIC_PACKAGE_ID,
+  );
+}
+
 function normalizeSuiAddress(value: string): string {
   const raw = value.trim().toLowerCase();
   const withoutPrefix = raw.startsWith("0x") ? raw.slice(2) : raw;
@@ -612,7 +635,7 @@ async function main() {
     "BACKEND_AGENT_PRIVATE_KEY",
     "AGENT_PRIVATE_KEY",
   );
-  const packageId = requireSuiAddressEnv("PACKAGE_ID");
+  const packageId = activePackageId();
   const mandateId = requireSuiAddressEnv("MANDATE_ID");
 
   const routeId = process.env.ROUTE_ID ?? "deep_momentum_buy";

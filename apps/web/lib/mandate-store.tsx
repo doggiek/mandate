@@ -1161,6 +1161,11 @@ export function MandateStoreProvider({
               isCurrentMandateObjectType(mandate.objectType),
           );
         const mandateIds = createdMandates.map((mandate) => mandate.id);
+        const mandateIdSet = new Set(mandateIds);
+        const belongsToLoadedMandate = (event: SuiEvent) => {
+          const mandateId = eventMandateId(event);
+          return Boolean(mandateId && mandateIdSet.has(mandateId));
+        };
         const [
           activityEvents,
           revokeEvents,
@@ -1168,22 +1173,14 @@ export function MandateStoreProvider({
           blockedEvents,
           withdrawEvents,
         ] = await Promise.all([
-            Promise.all(
-              mandateIds.map((id) => queryMandateActivityEvents(id)),
-            ).then((pages) => pages.flat()),
-            Promise.all(
-              mandateIds.map((id) => queryMandateRevokeEvents(id)),
-            ).then((pages) => pages.flat()),
-            Promise.all(
-              mandateIds.map((id) => queryMandateRejectEvents(id)),
-            ).then((pages) => pages.flat()),
-            Promise.all(
-              mandateIds.map((id) => queryMandateBlockedEvents(id)),
-            ).then((pages) => pages.flat()),
-            Promise.all(
-              mandateIds.map((id) => queryMandateWithdrawEvents(id)),
-            ).then((pages) => pages.flat()),
-          ]);
+          queryMandateActivityEvents(),
+          queryMandateRevokeEvents(),
+          queryMandateRejectEvents(),
+          queryMandateBlockedEvents(),
+          queryMandateWithdrawEvents(),
+        ]).then((pages) =>
+          pages.map((events) => events.filter(belongsToLoadedMandate)),
+        );
         const revokedMandateIds = new Set(
           revokeEvents
             .map(eventMandateId)

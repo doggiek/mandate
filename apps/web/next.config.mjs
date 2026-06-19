@@ -36,6 +36,9 @@ loadRootEnv();
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  turbopack: {
+    root: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."),
+  },
   env: {
     NEXT_PUBLIC_SUI_NETWORK: process.env.NEXT_PUBLIC_SUI_NETWORK,
     NEXT_PUBLIC_NETWORK: process.env.NEXT_PUBLIC_NETWORK,
@@ -93,6 +96,9 @@ const nextConfig = {
   },
   images: {
     unoptimized: true,
+  },
+  outputFileTracingIncludes: {
+    "/api/agent/run": ["../../scripts/**/*"],
   },
   devIndicators: {
     position: "bottom-right",

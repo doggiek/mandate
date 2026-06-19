@@ -112,6 +112,46 @@ function findRepoRoot() {
   );
 }
 
+function packageJsonHasScript(packageDir: string, scriptName: string) {
+  try {
+    const raw = fs.readFileSync(path.join(packageDir, "package.json"), "utf8");
+    const parsed = JSON.parse(raw) as { scripts?: Record<string, string> };
+    return Boolean(parsed.scripts?.[scriptName]);
+  } catch {
+    return false;
+  }
+}
+
+function findWebPackageRoot(repoRoot: string) {
+  const cwd = process.cwd();
+  const candidates = [
+    cwd,
+    path.join(repoRoot, "apps/web"),
+    path.resolve(cwd, "apps/web"),
+    path.resolve(cwd, ".."),
+  ];
+
+  return (
+    candidates.find((candidate) =>
+      packageJsonHasScript(candidate, "agent:swap"),
+    ) ?? cwd
+  );
+}
+
+function packageManagerCommand(packageRoot: string) {
+  const execPath = process.env.npm_execpath?.toLowerCase() ?? "";
+  if (execPath.includes("pnpm")) {
+    return "pnpm";
+  }
+  if (execPath.includes("npm")) {
+    return "npm";
+  }
+  if (fs.existsSync(path.join(packageRoot, "pnpm-lock.yaml"))) {
+    return "pnpm";
+  }
+  return "npm";
+}
+
 function runtimePackageId(repoRoot: string, network: SuiNetwork) {
   const env = runtimeEnvReader(repoRoot);
   const packageId = getPackageId(network, env);
@@ -576,16 +616,19 @@ export async function POST(request: Request) {
   }
 
   try {
+    const webPackageRoot = findWebPackageRoot(repoRoot);
+    const packageManager = packageManagerCommand(webPackageRoot);
+    const agentScript = blockedReason ? "agent:block" : "agent:swap";
     const DUSDCCoinType =
       runtimeEnvValue("NEXT_PUBLIC_DBUSDC_COIN_TYPE", repoRoot) ??
       runtimeEnvValue("NEXT_PUBLIC_DUSDC_COIN_TYPE", repoRoot) ??
       "";
 
     const { stdout, stderr } = await execFileAsync(
-      "npm",
-      ["run", blockedReason ? "agent:block" : "agent:swap", "--silent"],
+      packageManager,
+      ["run", agentScript, "--silent"],
       {
-        cwd: repoRoot,
+        cwd: webPackageRoot,
         env: {
           ...process.env,
           BACKEND_AGENT_PRIVATE_KEY: agentPrivateKey,

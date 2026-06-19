@@ -238,6 +238,23 @@ function OverviewMandatesTable({
   );
 }
 
+function OverviewMandatesSkeleton() {
+  return (
+    <div className="space-y-0">
+      {Array.from({ length: 3 }).map((_, row) => (
+        <div
+          key={row}
+          className="grid grid-cols-[1.6fr_0.8fr_0.8fr_1fr_0.8fr_0.8fr_0.8fr_0.8fr] gap-4 border-b border-border px-4 py-4 last:border-b-0"
+        >
+          {Array.from({ length: 8 }).map((__, col) => (
+            <Skeleton key={col} className="h-5 w-full" />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function OverviewView({
   onSelectMandate,
   onCreate,
@@ -389,7 +406,9 @@ export function OverviewView({
           </CardAction>
         </CardHeader>
         <CardContent className="p-0">
-          {activeMandates.length > 0 ? (
+          {loading && activeMandates.length === 0 ? (
+            <OverviewMandatesSkeleton />
+          ) : activeMandates.length > 0 ? (
             <OverviewMandatesTable
               mandates={activeMandates}
               onSelect={onSelectMandate}

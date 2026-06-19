@@ -86,6 +86,29 @@ function requireSuiAddressEnv(name: string): string {
   return value;
 }
 
+function requireSuiAddressValue(label: string, value: string | undefined) {
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${label}`);
+  }
+  const trimmed = value.trim();
+  if (!isValidSuiAddress(trimmed)) {
+    throw new Error(
+      `${label} must be a valid Sui object/address id, got: ${trimmed}`,
+    );
+  }
+  return trimmed;
+}
+
+function activePackageId() {
+  const networkSuffix = activeNetwork().toUpperCase();
+  return requireSuiAddressValue(
+    `PACKAGE_ID or NEXT_PUBLIC_PACKAGE_ID_${networkSuffix}`,
+    process.env.PACKAGE_ID ??
+      process.env[`NEXT_PUBLIC_PACKAGE_ID_${networkSuffix}`] ??
+      process.env.NEXT_PUBLIC_PACKAGE_ID,
+  );
+}
+
 function requireEnvIf(condition: boolean, name: string): string | undefined {
   if (!condition) {
     return undefined;
@@ -243,7 +266,7 @@ async function main() {
     "BACKEND_AGENT_PRIVATE_KEY",
     "AGENT_PRIVATE_KEY",
   );
-  const packageId = requireSuiAddressEnv("PACKAGE_ID");
+  const packageId = activePackageId();
   const mandateId = requireSuiAddressEnv("MANDATE_ID");
   const amountSui = process.env.AMOUNT_SUI ?? "0.001";
   const blockReason = process.env.BLOCK_REASON ?? "blocked_by_policy";
