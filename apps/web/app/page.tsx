@@ -16,7 +16,7 @@ export default function Page() {
       <SiteHeader />
       <main>
         <Hero />
-        <WhyMandate />
+        {/* <WhyMandate /> */}
         <Problem />
         <HowItWorks />
         <ProductDemo />
