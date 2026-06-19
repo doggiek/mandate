@@ -1,7 +1,3 @@
-import { execFile } from "node:child_process";
-import fs from "node:fs";
-import path from "node:path";
-import { promisify } from "node:util";
 import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import {
@@ -13,9 +9,11 @@ import {
   getSuiNetwork,
   type SuiNetwork,
 } from "@/lib/chain-config";
+import {
+  recordBlockedAction,
+  runAgentDeepBookSwap,
+} from "@/lib/server/agent-runner";
 import { defaultTradingRoute, tradingRouteById } from "@/lib/trading-routes";
-
-const execFileAsync = promisify(execFile);
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,96 +63,16 @@ const OLD_PACKAGE_ERROR =
 
 let loggedPackageId = false;
 
-function readSection(output: string, label: string) {
-  const match = output.match(new RegExp(`${label}:\\s*\\n([^\\n]*)`));
-  return match?.[1]?.trim() ?? "";
+function runtimeEnvValue(name: string) {
+  return process.env[name]?.trim();
 }
 
-function readEnvFileValue(filePath: string, name: string) {
-  try {
-    const raw = fs.readFileSync(filePath, "utf8");
-    const line = raw
-      .split(/\r?\n/)
-      .find((entry) => entry.trim().startsWith(`${name}=`));
-    if (!line) {
-      return undefined;
-    }
-    return line
-      .slice(line.indexOf("=") + 1)
-      .trim()
-      .replace(/^['"]|['"]$/g, "");
-  } catch {
-    return undefined;
-  }
+function runtimeEnvReader(name: string) {
+  return runtimeEnvValue(name);
 }
 
-function runtimeEnvValue(name: string, repoRoot: string) {
-  return (
-    process.env[name]?.trim() ||
-    readEnvFileValue(path.join(process.cwd(), ".env.local"), name) ||
-    readEnvFileValue(path.join(repoRoot, ".env.local"), name) ||
-    readEnvFileValue(path.join(repoRoot, ".env"), name)
-  );
-}
-
-function runtimeEnvReader(repoRoot: string) {
-  return (name: string) => runtimeEnvValue(name, repoRoot);
-}
-
-function findRepoRoot() {
-  const cwd = process.cwd();
-  const candidates = [cwd, path.resolve(cwd, "../.."), path.resolve(cwd, "..")];
-
-  return (
-    candidates.find((candidate) =>
-      fs.existsSync(path.join(candidate, "scripts/agent-deepbook-swap.ts")),
-    ) ?? path.resolve(cwd, "../..")
-  );
-}
-
-function packageJsonHasScript(packageDir: string, scriptName: string) {
-  try {
-    const raw = fs.readFileSync(path.join(packageDir, "package.json"), "utf8");
-    const parsed = JSON.parse(raw) as { scripts?: Record<string, string> };
-    return Boolean(parsed.scripts?.[scriptName]);
-  } catch {
-    return false;
-  }
-}
-
-function findWebPackageRoot(repoRoot: string) {
-  const cwd = process.cwd();
-  const candidates = [
-    cwd,
-    path.join(repoRoot, "apps/web"),
-    path.resolve(cwd, "apps/web"),
-    path.resolve(cwd, ".."),
-  ];
-
-  return (
-    candidates.find((candidate) =>
-      packageJsonHasScript(candidate, "agent:swap"),
-    ) ?? cwd
-  );
-}
-
-function packageManagerCommand(packageRoot: string) {
-  const execPath = process.env.npm_execpath?.toLowerCase() ?? "";
-  if (execPath.includes("pnpm")) {
-    return "pnpm";
-  }
-  if (execPath.includes("npm")) {
-    return "npm";
-  }
-  if (fs.existsSync(path.join(packageRoot, "pnpm-lock.yaml"))) {
-    return "pnpm";
-  }
-  return "npm";
-}
-
-function runtimePackageId(repoRoot: string, network: SuiNetwork) {
-  const env = runtimeEnvReader(repoRoot);
-  const packageId = getPackageId(network, env);
+function runtimePackageId(network: SuiNetwork) {
+  const packageId = getPackageId(network, runtimeEnvReader);
 
   if (!packageId) {
     throw new Error(
@@ -181,10 +99,10 @@ function runtimePackageId(repoRoot: string, network: SuiNetwork) {
   return packageId;
 }
 
-function runtimeAgentPrivateKey(repoRoot: string) {
+function runtimeAgentPrivateKey() {
   const agentPrivateKey =
-    runtimeEnvValue("BACKEND_AGENT_PRIVATE_KEY", repoRoot) ??
-    runtimeEnvValue("AGENT_PRIVATE_KEY", repoRoot);
+    runtimeEnvValue("BACKEND_AGENT_PRIVATE_KEY") ??
+    runtimeEnvValue("AGENT_PRIVATE_KEY");
 
   if (!agentPrivateKey) {
     throw new Error(
@@ -206,23 +124,22 @@ function agentAddressFromPrivateKey(agentPrivateKey: string) {
   return Ed25519Keypair.fromSecretKey(secretKey).toSuiAddress();
 }
 
-function runtimeBackendAgentAddress(repoRoot: string) {
+function runtimeBackendAgentAddress() {
   return (
-    runtimeEnvValue("NEXT_PUBLIC_BACKEND_AGENT_ADDRESS", repoRoot) ??
-    runtimeEnvValue("NEXT_PUBLIC_VERIFIED_AGENT_ADDRESS", repoRoot) ??
+    runtimeEnvValue("NEXT_PUBLIC_BACKEND_AGENT_ADDRESS") ??
+    runtimeEnvValue("NEXT_PUBLIC_VERIFIED_AGENT_ADDRESS") ??
     BACKEND_AGENT_ADDRESS
   );
 }
 
 function runtimeDeepBookRouteConfig(
-  repoRoot: string,
   network: SuiNetwork,
   routeId: string,
   configuredPoolId: string,
 ) {
   const activeRoute = getActiveDeepBookRouteConfig(
     network,
-    runtimeEnvReader(repoRoot),
+    runtimeEnvReader,
   );
   const poolId = activeRoute.poolId || configuredPoolId;
   const poolKey = activeRoute.poolKey;
@@ -295,16 +212,15 @@ function mandateObjectMatchesRoute(
   return Boolean(objectType?.endsWith("::mandate::Mandate"));
 }
 
-function fullnodeUrl(repoRoot: string, network: SuiNetwork) {
-  return getRpcUrl(network, runtimeEnvReader(repoRoot));
+function fullnodeUrl(network: SuiNetwork) {
+  return getRpcUrl(network, runtimeEnvReader);
 }
 
 async function fetchMandateObjectType(
   mandateId: string,
-  repoRoot: string,
   network: SuiNetwork,
 ) {
-  const response = await fetch(fullnodeUrl(repoRoot, network), {
+  const response = await fetch(fullnodeUrl(network), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -351,60 +267,6 @@ async function fetchMandateObjectType(
   return content?.dataType === "moveObject"
     ? { objectType: content.type, owner: content.fields?.owner }
     : { objectType: undefined, owner: undefined };
-}
-
-function parseAgentOutput(output: string, error?: string): AgentRunResult {
-  const status = readSection(output, "Status");
-  const blockedReasonText = readSection(output, "Blocked Reason");
-  const errorText = error ?? readSection(output, "Failure Reason");
-  const blockedReason = classifyBlockedReason(errorText);
-  const outputCoinObjects = readSection(output, "Output Coin Objects");
-  const outputCoinObjectIds =
-    outputCoinObjects && outputCoinObjects !== "-"
-      ? outputCoinObjects
-          .split(",")
-          .map((id) => id.trim())
-          .filter(Boolean)
-      : [];
-  const outputAsset = readSection(output, "Output Asset");
-  const outputCoinType = readSection(output, "Output Coin Type");
-  const outputAmount = readSection(output, "Output Amount");
-  const residualSui =
-    readSection(output, "Residual SUI") ||
-    readSection(output, "Residual DeepBook USDC");
-  const outputOwner = readSection(output, "Output Owner");
-  const fillStatus = readSection(output, "Fill Status");
-  return {
-    digest: readSection(output, "Digest"),
-    status:
-      status === "SUCCESS"
-        ? "SUCCESS"
-        : status === "BLOCKED"
-          ? "BLOCKED"
-          : blockedReason
-            ? "BLOCKED"
-            : "FAILED",
-    activityEventFound: readSection(output, "Activity Event") === "FOUND",
-    deepBookPoolMutationFound:
-      readSection(output, "DeepBook Pool Mutation") === "FOUND",
-    balanceChangeSui: readSection(output, "Balance Change") || "0 SUI",
-    gasFeeSui: readSection(output, "Gas Fee") || "-",
-    ...(outputAsset && outputAsset !== "-" ? { outputAsset } : {}),
-    ...(outputCoinType && outputCoinType !== "-" ? { outputCoinType } : {}),
-    ...(outputAmount && outputAmount !== "-" ? { outputAmount } : {}),
-    ...(residualSui && residualSui !== "-" ? { residualSui } : {}),
-    ...(outputCoinObjectIds.length > 0 ? { outputCoinObjectIds } : {}),
-    ...(outputOwner && outputOwner !== "-" ? { outputOwner } : {}),
-    ...(fillStatus === "filled" ||
-    fillStatus === "no_fill" ||
-    fillStatus === "amount_unavailable"
-      ? { fillStatus }
-      : {}),
-    ...(blockedReasonText || blockedReason
-      ? { blockedReason: blockedReasonText || blockedReason }
-      : {}),
-    ...(errorText ? { error: errorText } : {}),
-  };
 }
 
 function classifyBlockedReason(message?: string) {
@@ -519,7 +381,6 @@ function requestBlockedReason(body: AgentRunRequest) {
 }
 
 export async function POST(request: Request) {
-  const repoRoot = findRepoRoot();
   const body = await readAgentRequest(request);
   let mandateId: string;
   let ownerAddress: string;
@@ -539,12 +400,11 @@ export async function POST(request: Request) {
     amountSui = requestAmountSui(body);
     blockedReason = requestBlockedReason(body);
     tradingRoute = requestTradingRoute(body);
-    network = getSuiNetwork(runtimeEnvReader(repoRoot));
-    packageId = runtimePackageId(repoRoot, network);
-    agentPrivateKey = runtimeAgentPrivateKey(repoRoot);
-    backendAgentAddress = runtimeBackendAgentAddress(repoRoot);
+    network = getSuiNetwork(runtimeEnvReader);
+    packageId = runtimePackageId(network);
+    agentPrivateKey = runtimeAgentPrivateKey();
+    backendAgentAddress = runtimeBackendAgentAddress();
     const routeConfig = runtimeDeepBookRouteConfig(
-      repoRoot,
       network,
       tradingRoute.id,
       tradingRoute.action.poolId,
@@ -574,7 +434,6 @@ export async function POST(request: Request) {
   try {
     const { objectType, owner } = await fetchMandateObjectType(
       mandateId,
-      repoRoot,
       network,
     );
     if (!isCurrentMandateObjectType(objectType, packageId)) {
@@ -616,47 +475,38 @@ export async function POST(request: Request) {
   }
 
   try {
-    const webPackageRoot = findWebPackageRoot(repoRoot);
-    const packageManager = packageManagerCommand(webPackageRoot);
-    const agentScript = blockedReason ? "agent:block" : "agent:swap";
     const DUSDCCoinType =
-      runtimeEnvValue("NEXT_PUBLIC_DBUSDC_COIN_TYPE", repoRoot) ??
-      runtimeEnvValue("NEXT_PUBLIC_DUSDC_COIN_TYPE", repoRoot) ??
+      runtimeEnvValue("NEXT_PUBLIC_DBUSDC_COIN_TYPE") ??
+      runtimeEnvValue("NEXT_PUBLIC_DUSDC_COIN_TYPE") ??
       "";
-
-    const { stdout, stderr } = await execFileAsync(
-      packageManager,
-      ["run", agentScript, "--silent"],
-      {
-        cwd: webPackageRoot,
-        env: {
-          ...process.env,
-          BACKEND_AGENT_PRIVATE_KEY: agentPrivateKey,
-          AGENT_PRIVATE_KEY: agentPrivateKey,
-          PACKAGE_ID: packageId,
-          NEXT_PUBLIC_PACKAGE_ID: packageId,
-          NEXT_PUBLIC_SUI_NETWORK: network,
-          SUI_RPC_URL: fullnodeUrl(repoRoot, network),
-          NEXT_PUBLIC_BACKEND_AGENT_ADDRESS: backendAgentAddress,
-          MANDATE_ID: mandateId,
-          ROUTE_ID: tradingRoute.id,
-          POOL_KEY: deepBookPoolKey,
-          DEEPBOOK_POOL_ID: deepBookPoolId,
-          NEXT_PUBLIC_DEEPBOOK_POOL_ID: deepBookPoolId,
-          NEXT_PUBLIC_DBUSDC_COIN_TYPE: DUSDCCoinType,
-          NEXT_PUBLIC_DUSDC_COIN_TYPE: DUSDCCoinType,
-          AMOUNT_SUI: amountSui,
-          SPEND_ASSET: tradingRoute.action.spendAsset,
-          BUY_ASSET: tradingRoute.action.buyAsset,
-          STRATEGY: requestStrategy(body),
-          ...(blockedReason ? { BLOCK_REASON: blockedReason } : {}),
-        },
-        timeout: 120_000,
-        maxBuffer: 1024 * 1024,
-      },
-    );
-
-    const result = parseAgentOutput(stdout, stderr.trim() || undefined);
+    const rpcUrl = fullnodeUrl(network);
+    const result = blockedReason
+      ? await recordBlockedAction({
+          agentPrivateKey,
+          expectedAgentAddress: backendAgentAddress,
+          packageId,
+          mandateId,
+          routeId: tradingRoute.id,
+          network,
+          rpcUrl,
+          amountSui,
+          reason: blockedReason,
+          dusdcCoinType: DUSDCCoinType,
+        })
+      : await runAgentDeepBookSwap({
+          agentPrivateKey,
+          expectedAgentAddress: backendAgentAddress,
+          packageId,
+          mandateId,
+          routeId: tradingRoute.id,
+          network,
+          rpcUrl,
+          poolKey: deepBookPoolKey,
+          poolId: deepBookPoolId,
+          amountSui,
+          strategy: requestStrategy(body),
+          dusdcCoinType: DUSDCCoinType,
+        });
     console.info("[MANDATE] agent run result", {
       owner: ownerAddress,
       mandateId,
@@ -672,15 +522,14 @@ export async function POST(request: Request) {
       status: result.status === "FAILED" ? 500 : 200,
     });
   } catch (caught) {
-    const error = caught as {
-      stdout?: string;
-      stderr?: string;
-      message?: string;
+    const error = caught instanceof Error ? caught.message : String(caught);
+    const blockedReasonFromError = classifyBlockedReason(error);
+    const result = {
+      ...EMPTY_RESULT,
+      status: blockedReasonFromError ? ("BLOCKED" as const) : ("FAILED" as const),
+      ...(blockedReasonFromError ? { blockedReason: blockedReasonFromError } : {}),
+      error,
     };
-    const output = `${error.stdout ?? ""}\n${error.stderr ?? ""}`;
-    const result = output.trim()
-      ? parseAgentOutput(output, error.stderr?.trim() || error.message)
-      : { ...EMPTY_RESULT, error: error.message ?? "Agent execution failed" };
 
     console.info("[MANDATE] agent run result", {
       owner: ownerAddress,
