@@ -58,7 +58,9 @@ type RuntimeLogLevel =
   | "execute"
   | "filled"
   | "no_fill"
-  | "failed";
+  | "failed"
+  | "revoked"
+  | "withdrawn";
 
 type RuntimeLogEntry = {
   id: string;
@@ -256,20 +258,18 @@ function runtimeLogLevelClass(level: RuntimeLogLevel) {
     level === "triggered" ||
     level === "policy" ||
     level === "filled" ||
-    level === "success"
+    level === "success" ||
+    level === "withdrawn"
   ) {
     return "border-emerald-500/25 bg-emerald-500/10 text-emerald-300";
   }
   if (level === "signal" || level === "execute") {
     return "border-cyan-400/25 bg-cyan-400/10 text-cyan-300";
   }
-  if (level === "blocked" || level === "no_fill") {
+  if (level === "waiting" || level === "no_fill") {
     return "border-amber-500/25 bg-amber-500/10 text-amber-300";
   }
-  if (level === "waiting") {
-    return "border-zinc-500/25 bg-zinc-500/10 text-zinc-300";
-  }
-  if (level === "failed") {
+  if (level === "blocked" || level === "failed" || level === "revoked") {
     return "border-destructive/30 bg-destructive/10 text-destructive";
   }
   return "border-border bg-background/60 text-muted-foreground";
@@ -958,6 +958,13 @@ export function AgentExecutionPanel({
   const initializedMandateScopeRef = React.useRef<string | null>(null);
   const skipNextPersistRef = React.useRef(false);
   const loggedPageLoadedRef = React.useRef(false);
+  const tracedLifecycleActivityRef = React.useRef<{
+    mandateId: string | null;
+    seen: Set<string>;
+  }>({
+    mandateId: null,
+    seen: new Set(),
+  });
   const [mandateQueryReady, setMandateQueryReady] = React.useState(false);
   const mandateLoadingSeenRef = React.useRef(false);
   const automationSessionIdRef = React.useRef(
@@ -1153,6 +1160,59 @@ export function AgentExecutionPanel({
       activity.filter((event) => event.mandateId === selectedMandate.id),
     ).slice(0, 5);
   }, [activity, selectedMandate?.id]);
+
+  React.useEffect(() => {
+    if (!selectedMandate?.id) {
+      tracedLifecycleActivityRef.current = {
+        mandateId: null,
+        seen: new Set(),
+      };
+      return;
+    }
+
+    const lifecycleEvents = selectedMandateActivity.filter(
+      (event) =>
+        event.kind === "mandate.revoked" ||
+        event.kind === "mandate.withdrawn",
+    );
+    const eventKey = (event: (typeof lifecycleEvents)[number]) =>
+      `${event.kind}:${event.digest ?? event.id}`;
+
+    if (tracedLifecycleActivityRef.current.mandateId !== selectedMandate.id) {
+      tracedLifecycleActivityRef.current = {
+        mandateId: selectedMandate.id,
+        seen: new Set(lifecycleEvents.map(eventKey)),
+      };
+      return;
+    }
+
+    const newEvents = lifecycleEvents.filter(
+      (event) => !tracedLifecycleActivityRef.current.seen.has(eventKey(event)),
+    );
+
+    if (newEvents.length === 0) {
+      return;
+    }
+
+    for (const event of [...newEvents].reverse()) {
+      tracedLifecycleActivityRef.current.seen.add(eventKey(event));
+      if (event.kind === "mandate.revoked") {
+        appendRuntimeLog("revoked", "Owner revoked mandate.", event.digest);
+      }
+      if (event.kind === "mandate.withdrawn") {
+        const amount =
+          typeof event.amountSui === "number" && event.amountSui > 0
+            ? `: ${formatSui(event.amountSui)}`
+            : "";
+        appendRuntimeLog(
+          "withdrawn",
+          `Remaining funds withdrawn${amount}.`,
+          event.digest,
+        );
+      }
+    }
+  }, [appendRuntimeLog, selectedMandate?.id, selectedMandateActivity]);
+
   const latestMandateOrder = React.useMemo(() => {
     if (!selectedMandate?.id) {
       return null;
@@ -2862,16 +2922,16 @@ export function AgentExecutionPanel({
         <section className="flex flex-col gap-3 rounded-lg border border-border bg-background/45 p-3">
           <div>
             <h3 className="text-sm font-semibold text-foreground">
-              Execution Log
+              Execution Trace
             </h3>
             <p className="text-xs text-muted-foreground">
-              Signal checks, policy decisions, execution results, and on-chain
-              proof events.
+              Live trace of signal checks, policy decisions, execution results,
+              and on-chain proof.
             </p>
           </div>
 
           {runtimeLog.length > 0 ? (
-            <div className="rounded-lg border border-cyan-400/10 bg-zinc-950/85 p-3 font-mono text-xs shadow-inner shadow-black/30">
+            <div className="max-h-[360px] overflow-y-auto rounded-lg border border-cyan-400/10 bg-zinc-950/85 p-3 pr-2 font-mono text-xs shadow-inner shadow-black/30">
               {runtimeLog.map((entry) => (
                 <div
                   key={entry.id}
