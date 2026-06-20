@@ -1,7 +1,7 @@
 # Mandate Architecture
 
-Mandate is an Autonomous Agent Wallet on Sui. The system separates ownership,
-policy, execution, and proof:
+Mandate is a programmable permission layer for autonomous agent wallets on Sui.
+The system separates ownership, policy, execution, and proof:
 
 ```text
 Owner Wallet
@@ -93,7 +93,6 @@ Current executable strategy:
 - route: DEEP_SUI
 
 Planned signal types include volatility guard, whale flow, and AI risk signal.
-The project does not currently claim AI price prediction.
 
 ### Policy Gate
 

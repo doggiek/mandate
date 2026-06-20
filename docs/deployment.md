@@ -1,87 +1,214 @@
-# Testnet Deployment
+# Deployment
 
-Run contract tests:
+Mandate is deployed as a Next.js app from the `apps/web` workspace. The
+deployment model should match local development: pnpm, `apps/web` as the app
+root, and environment-driven network configuration.
 
-```bash
-npm run contract:test
+## Vercel Settings
+
+Use these project settings:
+
+| Setting | Value |
+| --- | --- |
+| Framework Preset | Next.js |
+| Root Directory | `apps/web` |
+| Install Command | `pnpm install` |
+| Build Command | `pnpm build` |
+| Output Directory | Next.js default |
+
+Do not deploy with npm commands. The project is expected to run through pnpm in
+the `apps/web` workspace.
+
+## Runtime Model
+
+The production API route `/api/agent/run` runs in the Next.js Node.js runtime.
+It directly imports the server-side agent runner from:
+
+```text
+apps/web/lib/server/agent-runner.ts
 ```
 
-Publish a new package:
+This is important for Vercel:
 
-```bash
-npm run contract:publish:testnet
-npm run contract:extract-package -- contracts/deployments/testnet/latest-publish.json
+- The API route does not spawn `npm`, `pnpm`, `yarn`, or any package manager.
+- The API route does not assume the current working directory is the repository
+  root.
+- Agent execution and blocked-action recording are called as server-side
+  functions.
+
+The scripts in `apps/web/package.json`:
+
+```text
+agent:swap
+agent:block
+agent:record-blocked
 ```
 
-Upgrade an existing package:
+are local CLI/debug entrypoints only. Production request handling must not call
+those scripts through a shell.
 
-```bash
-UPGRADE_CAP_ID=<upgrade-cap-object-id> npm run contract:upgrade:testnet
-npm run contract:extract-package -- contracts/deployments/testnet/latest-upgrade.json
-```
+## Environment Variables
 
-Update the package id for the active network:
+Configure environment variables in Vercel for each environment. For local
+development, keep a single `.env.local` at the repository root. Do not create or
+copy secrets into `apps/web/.env.local`.
 
-```bash
+The active network is selected by:
+
+```env
 NEXT_PUBLIC_SUI_NETWORK=testnet
-NEXT_PUBLIC_PACKAGE_ID_TESTNET=<package_id>
 ```
 
-For mainnet deployments, set `NEXT_PUBLIC_SUI_NETWORK=mainnet` and configure
-`NEXT_PUBLIC_PACKAGE_ID_MAINNET` plus the mainnet DeepBook route and explorer
-variables. Switching networks is env-only: update the root `.env.local` or
-deployment environment, then restart or redeploy. No code changes are required.
+Supported values:
 
-Network-scoped route variables:
+```text
+testnet
+mainnet
+```
 
-```bash
-NEXT_PUBLIC_SUI_RPC_TESTNET=
+Network switching is env-only. Change `NEXT_PUBLIC_SUI_NETWORK` and the matching
+network-scoped variables, then redeploy or restart the app. No code changes are
+required.
+
+Required testnet values:
+
+```env
+NEXT_PUBLIC_SUI_NETWORK=testnet
+NEXT_PUBLIC_PACKAGE_ID_TESTNET=
 NEXT_PUBLIC_DEEPBOOK_POOL_KEY_TESTNET=DEEP_SUI
 NEXT_PUBLIC_DEEPBOOK_POOL_ID_TESTNET=
 NEXT_PUBLIC_SPEND_COIN_TYPE_TESTNET=0x2::sui::SUI
 NEXT_PUBLIC_BUY_COIN_TYPE_TESTNET=
+NEXT_PUBLIC_EXECUTION_AMOUNT_TESTNET=1
 NEXT_PUBLIC_EXPLORER_BASE_URL_TESTNET=https://testnet.suivision.xyz
+BACKEND_AGENT_PRIVATE_KEY=
+NEXT_PUBLIC_BACKEND_AGENT_ADDRESS=
+```
 
-NEXT_PUBLIC_SUI_RPC_MAINNET=
+Required mainnet values, when mainnet is intentionally enabled:
+
+```env
+NEXT_PUBLIC_SUI_NETWORK=mainnet
+NEXT_PUBLIC_PACKAGE_ID_MAINNET=
 NEXT_PUBLIC_DEEPBOOK_POOL_KEY_MAINNET=
 NEXT_PUBLIC_DEEPBOOK_POOL_ID_MAINNET=
 NEXT_PUBLIC_SPEND_COIN_TYPE_MAINNET=0x2::sui::SUI
 NEXT_PUBLIC_BUY_COIN_TYPE_MAINNET=
+NEXT_PUBLIC_EXECUTION_AMOUNT_MAINNET=
 NEXT_PUBLIC_EXPLORER_BASE_URL_MAINNET=https://suivision.xyz
-```
-
-Configure the backend Agent signer:
-
-```bash
-BACKEND_AGENT_PRIVATE_KEY=<sui-private-key>
-NEXT_PUBLIC_BACKEND_AGENT_ADDRESS=<backend-agent-address>
+BACKEND_AGENT_PRIVATE_KEY=
+NEXT_PUBLIC_BACKEND_AGENT_ADDRESS=
 ```
 
 `BACKEND_AGENT_PRIVATE_KEY` is the platform backend Agent signer. It pays gas
-and submits autonomous PTBs. It is not the Owner wallet private key; Owner funds
+and submits autonomous PTBs. It is not a user wallet private key. Owner assets
 come from the Mandate vault, and swap output assets return to the Owner wallet.
 
-Legacy names are still accepted as fallback during local migration:
-`AGENT_PRIVATE_KEY` and `NEXT_PUBLIC_VERIFIED_AGENT_ADDRESS`.
+Legacy env names are supported only as deprecated fallbacks during migration:
 
-Restart the Next.js dev server from the repository root after updating
-`.env.local`:
-
-```bash
-npm run dev
+```env
+AGENT_PRIVATE_KEY=
+NEXT_PUBLIC_VERIFIED_AGENT_ADDRESS=
 ```
 
-The root `.env.local` is the single source of truth for local environment
-variables. Do not create a separate `apps/web/.env.local`.
+New deployments should use `BACKEND_AGENT_PRIVATE_KEY` and
+`NEXT_PUBLIC_BACKEND_AGENT_ADDRESS`.
 
-If you publish a new package instead of upgrading the existing one, recreate the
-Mandate object so its type belongs to the latest package.
+## Local Development
 
-Create a Mandate from `/console` after the package id is updated.
+Install dependencies from the web workspace:
 
-Verify blocked event support:
+```bash
+cd apps/web
+pnpm install
+```
 
-1. Select the new active Mandate in Automation.
-2. Run `Per-tx guard` or `Budget guard`.
-3. Confirm the result shows `BLOCKED` with a real digest.
-4. Open the digest in SuiVision and confirm `BlockedEvent` was emitted.
+Create local env at the repository root:
+
+```bash
+cd ../..
+cp .env.example .env.local
+```
+
+Run the app from the repository root:
+
+```bash
+pnpm dev
+```
+
+You can also run from the web workspace:
+
+```bash
+cd apps/web
+pnpm dev
+```
+
+Both paths are supported. The Next.js config loads the repository-root
+`.env.local` for local development, so the root env file remains the source of
+truth.
+
+## Contract Deployment
+
+Run Move tests before publishing:
+
+```bash
+pnpm contract:test
+```
+
+Publish or upgrade on testnet from the repository root:
+
+```bash
+pnpm contract:publish:testnet
+UPGRADE_CAP_ID=<upgrade-cap-object-id> pnpm contract:upgrade:testnet
+pnpm contract:extract-package
+```
+
+After publishing a new package, update the corresponding network-scoped package
+id, for example:
+
+```env
+NEXT_PUBLIC_PACKAGE_ID_TESTNET=<new-package-id>
+```
+
+Then restart local Next.js or redeploy Vercel, and create a fresh Mandate for
+the new package.
+
+## Testnet Route Notes
+
+The current executable testnet route is:
+
+```text
+SUI vault -> DEEP_SUI -> DEEP output
+```
+
+DUSDC / Circle USDC support was investigated through the generic
+`AssetMandate<T>` framework, but the current DeepBook testnet does not have a
+registered fillable pool for those exact coin types. USDC routes remain disabled
+until the exact coin type and registered DeepBook pool are verified.
+
+## Troubleshooting
+
+If Mandates fail to load, verify the active network and matching package id:
+
+```env
+NEXT_PUBLIC_SUI_NETWORK=testnet
+NEXT_PUBLIC_PACKAGE_ID_TESTNET=
+```
+
+If a route appears disabled, verify the active network has a complete route
+configuration:
+
+```env
+NEXT_PUBLIC_DEEPBOOK_POOL_KEY_TESTNET=
+NEXT_PUBLIC_DEEPBOOK_POOL_ID_TESTNET=
+NEXT_PUBLIC_SPEND_COIN_TYPE_TESTNET=
+NEXT_PUBLIC_BUY_COIN_TYPE_TESTNET=
+```
+
+If `/api/agent/run` reports an agent signer mismatch, verify that
+`BACKEND_AGENT_PRIVATE_KEY` derives to `NEXT_PUBLIC_BACKEND_AGENT_ADDRESS`.
+
+If Vercel logs ever show `spawn pnpm ENOENT`, `spawn npm ENOENT`, or
+`Command failed: npm run agent:swap`, the API route has regressed to shelling
+out to a package manager. The production API path should directly call the
+server-side runner.

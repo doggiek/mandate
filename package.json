@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "npm --prefix apps/web run dev",
+    "dev": "pnpm --dir apps/web dev",
     "agent:swap": "tsx scripts/agent-deepbook-swap.ts",
     "agent:block": "tsx scripts/agent-record-blocked.ts",
     "contract:test": "cd contracts && sui move test",
