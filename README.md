@@ -14,13 +14,13 @@ Mandate solves this by letting users define execution policies once, and delegat
 
 Mandate defines a constrained execution policy layer.
 
+It enforces:
+
+Budget limits · Per-transaction caps · Protocol restrictions · Expiration windows · Owner revocation
+
 All rules are enforced on-chain using Move objects. Within these constraints, agents can execute strategies like DCA on DeepBook without repeated approvals. Every execution, rejection, expiration, and revocation is fully verifiable on-chain.
 
 Mandate enables a safer model for autonomous execution on Sui.
-
-## What It Enforces
-
-Budget limits · Per-transaction caps · Protocol restrictions · Expiration windows · Owner revocation
 
 ## System Capabilities
 
@@ -57,7 +57,7 @@ It demonstrates constrained autonomous execution: users keep wallet ownership, w
 ## Links
 
 - Demo Video: https://youtu.be/0ri2MwXb2GI
-- Docs: https://github.com/doggiek/mandate/wiki
+- Docs: https://usemandate.vercel.app/docs
 - GitHub: https://github.com/doggiek/mandate
 - Product: https://usemandate.vercel.app/
 - X: https://x.com/BuildMandate

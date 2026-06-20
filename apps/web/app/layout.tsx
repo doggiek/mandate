@@ -6,7 +6,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Mandate · Programmable Permission Layer",
   description:
-    "A programmable permission layer for autonomous agent wallets on Sui. Sign once, execute many times.",
+    "A programmable permission layer for autonomous agent wallets on Sui. Sign once. Execute within limits.",
   icons: {
     icon: [
       {

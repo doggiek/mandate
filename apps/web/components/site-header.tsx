@@ -57,7 +57,7 @@ export function SiteHeader() {
             size="sm"
             className="hidden text-muted-foreground hover:text-foreground sm:inline-flex"
             nativeButton={false}
-            render={<a href="https://github.com/doggiek/mandate#readme" />}
+            render={<a href="/docs" />}
           >
             Docs
           </Button>

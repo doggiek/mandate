@@ -83,9 +83,9 @@ export function Hero() {
             expiry, and revocation limits.
           </p> */}
           <p className="mt-6 max-w-xl text-pretty text-lg leading-relaxed text-muted-foreground">
-            Mandate lets owners define budgets, protocol scope, and expiration
-            once, then allow agents to execute autonomously within those limits
-            — without requiring a signature for every action.
+            AI agents are stuck behind the approval wall. Mandate lets users
+            define execution policies once and delegate constrained authority
+            for real DeepBook execution without repeated approvals.
           </p>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">

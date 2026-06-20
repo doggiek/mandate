@@ -1,10 +1,52 @@
 # Deployment
 
-Mandate is deployed as a Next.js app from the `apps/web` workspace. The
-deployment model should match local development: pnpm, `apps/web` as the app
-root, and environment-driven network configuration.
+Mandate is deployed as a Next.js app from the `apps/web` workspace. Local
+development can start from the repository root through the root `pnpm dev`
+script, while Vercel builds from `apps/web`.
 
-## Vercel Settings
+## Local Development
+
+Install dependencies from the repository root:
+
+```bash
+pnpm install
+```
+
+Create local env at the repository root:
+
+```bash
+cp .env.example .env.local
+```
+
+Recommended local development command:
+
+```bash
+pnpm dev
+```
+
+The root `dev` script delegates to `apps/web`, and `apps/web/next.config.mjs`
+loads the repository-root `.env.local`. The root env file remains the source of
+truth.
+
+You can also run the web app directly from the workspace when needed:
+
+```bash
+cd apps/web
+pnpm dev
+```
+
+For a local production build, run from the web workspace:
+
+```bash
+cd apps/web
+pnpm build
+```
+
+The repository root currently exposes `pnpm dev`, but not a root `pnpm build`
+script. This matches the Vercel setup because Vercel's Root Directory is
+`apps/web`; in Vercel, `pnpm build` runs inside that workspace.
+
+## Vercel Deployment
 
 Use these project settings:
 
@@ -113,39 +155,6 @@ NEXT_PUBLIC_VERIFIED_AGENT_ADDRESS=
 
 New deployments should use `BACKEND_AGENT_PRIVATE_KEY` and
 `NEXT_PUBLIC_BACKEND_AGENT_ADDRESS`.
-
-## Local Development
-
-Install dependencies from the web workspace:
-
-```bash
-cd apps/web
-pnpm install
-```
-
-Create local env at the repository root:
-
-```bash
-cd ../..
-cp .env.example .env.local
-```
-
-Run the app from the repository root:
-
-```bash
-pnpm dev
-```
-
-You can also run from the web workspace:
-
-```bash
-cd apps/web
-pnpm dev
-```
-
-Both paths are supported. The Next.js config loads the repository-root
-`.env.local` for local development, so the root env file remains the source of
-truth.
 
 ## Contract Deployment
 

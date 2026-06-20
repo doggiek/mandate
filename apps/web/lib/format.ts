@@ -56,19 +56,24 @@ export function stableExpiryLabel(
   }
 
   const then = new Date(iso).getTime()
-  const now = new Date(DEMO_NOW_ISO).getTime()
+  const now = Date.now()
   const diffMs = then - now
 
   if (diffMs <= 0) {
     return "Expired"
   }
 
-  const hours = Math.round(diffMs / 3600000)
+  const minutes = Math.ceil(diffMs / 60000)
+  if (minutes < 60) {
+    return `${minutes}m`
+  }
+
+  const hours = Math.ceil(diffMs / 3600000)
   if (hours <= 24) {
     return `${hours}h`
   }
 
-  return `${Math.round(hours / 24)}d`
+  return `${Math.ceil(hours / 24)}d`
 }
 
 export function formatDate(iso: string): string {

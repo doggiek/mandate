@@ -13,19 +13,13 @@ export function CtaSection() {
       <div className="pointer-events-none absolute left-1/2 top-1/2 size-[480px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary/10 blur-[130px]" />
 
       <div className="relative mx-auto max-w-3xl px-4 text-center sm:px-6">
-        <h2 className="text-balance text-3xl font-medium tracking-tight sm:text-5xl">
-          <span className="block">
-            AI agents are stuck behind the approve wall.
-          </span>
-          <span className="mt-3 block">
-            Mandate removes that wall —
-            <br className="hidden sm:block" /> without giving up control.
-          </span>
-        </h2>
-        <p className="mx-auto mt-5 max-w-xl text-pretty text-lg leading-relaxed text-muted-foreground">
-          Mandate gives an AI agent a capped budget and protocol scope on Sui —
-          then every action is enforced and recorded on-chain.
+        <p className="mx-auto mb-5 max-w-xl text-pretty text-lg font-normal leading-relaxed text-muted-foreground/75">
+          AI agents are stuck behind the approve wall.
         </p>
+        <h2 className="text-balance text-3xl font-semibold leading-[1.08] tracking-tight sm:text-5xl">
+          Mandate removes that wall —
+          <br className="hidden sm:block" /> without giving up control.
+        </h2>
 
         <div className="mt-8 flex justify-center">
           <Button
@@ -60,7 +54,7 @@ export function SiteFooter() {
           {[
             {
               label: "Docs",
-              href: "https://github.com/doggiek/mandate#readme",
+              href: "/docs",
             },
             { label: "GitHub", href: "https://github.com/doggiek/mandate" },
             { label: "X", href: "https://x.com/BuildMandate" },
